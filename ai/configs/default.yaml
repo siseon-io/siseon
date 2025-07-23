@@ -1,0 +1,34 @@
+common:
+  seed:   42
+  gpu_id: 6
+  paths:
+    output_root: "runs"
+
+gaze:
+  data:
+    api_key:      "MF8Wd7JxbRUZSmQTC9fw"
+    workspace:    "eye-annotations-yolo-to-voc"
+    project_name: "eye-detection-kso3d"
+    version:      4
+    data_fmt:     "yolov11"
+  model:
+    name:       "yolo11n.pt"
+    epochs:     200
+    img_size:   416
+    batch_size: 16
+    workers:    4
+  inference:
+    conf_thresh:  0.25
+    webcam_index: 0
+    cam_width:    640
+    cam_height:   480
+    backend_url:  "http://your.backend/api/eyes"
+    weights: "runs/train/eye-detection-kso3d_v4/weights/best.pt"
+
+hpo:
+  n_trials:     20
+  timeout:      3600
+  trial_epochs: 1
+  pruner:
+    type:         median
+    warmup_steps: 5
