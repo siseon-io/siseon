@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'login_screen.dart';
+import 'package:siseon2/services/auth_service.dart';
+import 'package:siseon2/services/profile_cache_service.dart';
+import '/login_screen.dart';
+import '/profile_select_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,7 +23,7 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        fontFamily: 'Pretendard', // ✅ 폰트 전역 적용
+        fontFamily: 'Pretendard',
         scaffoldBackgroundColor: const Color(0xFF0D1117),
         textTheme: const TextTheme(
           bodyLarge: TextStyle(color: Colors.white),
@@ -49,12 +52,29 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    Future.delayed(const Duration(seconds: 2), () {
+    initApp();
+  }
+
+  Future<void> initApp() async {
+    await Future.delayed(const Duration(seconds: 2)); // 로고 보여주기
+
+    final token = await AuthService.getValidAccessToken();
+
+    if (token != null) {
+      // ✅ 자동 로그인 성공 → 프로필은 매번 새로 고르게 초기화
+      await ProfileCacheService.clearProfile();
+
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        MaterialPageRoute(builder: (_) => const ProfileSelectScreen()),
       );
-    });
+    } else {
+      // ❌ 로그인 필요
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
+    }
   }
 
   @override

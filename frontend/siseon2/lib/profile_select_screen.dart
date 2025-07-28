@@ -2,8 +2,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:siseon2/services/auth_service.dart';
-import 'root_screen.dart';
-import 'pages/profile_create.dart';
+import 'package:siseon2/services/profile_cache_service.dart';
+import '/root_screen.dart';
+import '/pages/profile_create.dart';
 
 class ProfileSelectScreen extends StatefulWidget {
   const ProfileSelectScreen({super.key});
@@ -29,19 +30,34 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
       return;
     }
 
-    final response = await http.get(
-      Uri.parse('http://i13b101.p.ssafy.io:8080/api/profile'),
-      headers: {'Authorization': 'Bearer $token'},
-    );
+    try {
+      final response = await http.get(
+        Uri.parse('http://i13b101.p.ssafy.io:8080/api/profile'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
 
-    if (response.statusCode == 200) {
-      final List data = jsonDecode(response.body);
-      setState(() {
-        _profiles = List<Map<String, dynamic>>.from(data);
-        _isLoading = false;
-      });
-    } else {
-      showError('프로필 조회 실패 (${response.statusCode})');
+      print('📦 [응답 상태코드] ${response.statusCode}');
+      print('📦 [raw body] ${response.body}');
+      print('📦 [bodyBytes] ${response.bodyBytes}');
+
+      if (response.statusCode == 200) {
+        // utf8 디코딩 로그
+        final decoded = utf8.decode(response.bodyBytes);
+        print('📦 [utf8 디코딩 결과] $decoded');
+
+        final List data = jsonDecode(decoded);
+        print('📦 [파싱된 JSON] $data');
+
+        setState(() {
+          _profiles = List<Map<String, dynamic>>.from(data);
+          _isLoading = false;
+        });
+      } else {
+        showError('프로필 조회 실패 (${response.statusCode})');
+      }
+    } catch (e) {
+      print('❌ [예외 발생] $e');
+      showError('예외 발생: $e');
     }
   }
 
@@ -67,6 +83,14 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
       return AssetImage(imageUrl);
     }
     return null;
+  }
+
+  Future<void> onProfileSelected(Map<String, dynamic> profile) async {
+    await ProfileCacheService.saveProfile(profile); // ✅ 선택된 프로필 캐싱
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const RootScreen()),
+    );
   }
 
   @override
@@ -105,13 +129,7 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
                 if (isAddButton) {
                   onAddPressed();
                 } else {
-                  final name = profile['name'] ?? '이름 없음';
-                  Navigator.pushReplacement(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => RootScreen(userName: name),
-                    ),
-                  );
+                  onProfileSelected(profile);
                 }
               },
               child: AnimatedContainer(
@@ -135,8 +153,9 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      isAddButton ? '프로필 추가' : profile['name'] ?? '',
+                      isAddButton ? '프로필 추가' : (profile['name'] ?? ''),
                       style: const TextStyle(
+                        fontFamily: 'Pretendard', // 👉 이걸 명시해줘야 진짜 적용됨
                         fontSize: 18,
                         color: Colors.white,
                         fontWeight: FontWeight.w600,
