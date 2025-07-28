@@ -1,30 +1,79 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:siseon2/services/auth_service.dart';
 import 'root_screen.dart';
+import 'pages/profile_create.dart';
 
-class ProfileSelectScreen extends StatelessWidget {
-  static const List<Map<String, String>> dummyProfiles = [
-    {'name': '초록이', 'image': 'assets/images/profile_frog.png'},
-    {'name': '야옹이', 'image': 'assets/images/profile_cat.png'},
-    {'name': '멍멍이', 'image': 'assets/images/profile_dog.png'},
-  ];
-
+class ProfileSelectScreen extends StatefulWidget {
   const ProfileSelectScreen({super.key});
 
-  void onAddPressed(BuildContext context) {
-    // 여기에 프로필 추가 화면으로 이동하는 로직 구현
-    print("➕ 프로필 추가 버튼 눌림");
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('프로필 추가 화면으로 이동!')),
+  @override
+  State<ProfileSelectScreen> createState() => _ProfileSelectScreenState();
+}
+
+class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
+  List<Map<String, dynamic>> _profiles = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    fetchProfiles();
+  }
+
+  Future<void> fetchProfiles() async {
+    final token = await AuthService.getValidAccessToken();
+    if (token == null) {
+      showError('로그인이 필요합니다.');
+      return;
+    }
+
+    final response = await http.get(
+      Uri.parse('http://i13b101.p.ssafy.io:8080/api/profile'),
+      headers: {'Authorization': 'Bearer $token'},
     );
+
+    if (response.statusCode == 200) {
+      final List data = jsonDecode(response.body);
+      setState(() {
+        _profiles = List<Map<String, dynamic>>.from(data);
+        _isLoading = false;
+      });
+    } else {
+      showError('프로필 조회 실패 (${response.statusCode})');
+    }
+  }
+
+  void showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void onAddPressed() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfileCreateScreen()),
+    );
+    if (result == true) {
+      fetchProfiles();
+    }
+  }
+
+  ImageProvider? _getImageProvider(String? imageUrl) {
+    if (imageUrl == null) return null;
+    if (imageUrl.startsWith('http')) {
+      return NetworkImage(imageUrl);
+    } else if (imageUrl.startsWith('assets/')) {
+      return AssetImage(imageUrl);
+    }
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
-    final profiles = List<Map<String, String>>.from(dummyProfiles);
-    final hasAddButton = profiles.length < 4;
-
-    if (hasAddButton) {
-      profiles.add({'name': '', 'image': ''}); // "+" 버튼용 빈 항목 추가
+    final profilesWithAdd = [..._profiles];
+    if (_profiles.length < 4) {
+      profilesWithAdd.add({'isAddButton': true});
     }
 
     return Scaffold(
@@ -35,10 +84,12 @@ class ProfileSelectScreen extends StatelessWidget {
         elevation: 0,
         centerTitle: true,
       ),
-      body: Padding(
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Padding(
         padding: const EdgeInsets.all(20),
         child: GridView.builder(
-          itemCount: profiles.length,
+          itemCount: profilesWithAdd.length,
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
             crossAxisSpacing: 24,
@@ -46,17 +97,15 @@ class ProfileSelectScreen extends StatelessWidget {
             childAspectRatio: 0.85,
           ),
           itemBuilder: (context, index) {
-            final profile = profiles[index];
-
-            final isAddButton = profile['name'] == '';
+            final profile = profilesWithAdd[index];
+            final isAddButton = profile['isAddButton'] == true;
 
             return GestureDetector(
               onTap: () {
                 if (isAddButton) {
-                  onAddPressed(context);
+                  onAddPressed();
                 } else {
-                  final name = profile['name']!;
-                  print('👉 선택된 프로필: $name');
+                  final name = profile['name'] ?? '이름 없음';
                   Navigator.pushReplacement(
                     context,
                     MaterialPageRoute(
@@ -73,39 +122,31 @@ class ProfileSelectScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(color: Colors.white24, width: 1),
                 ),
-                child: isAddButton
-                    ? Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    Icon(Icons.add_circle_outline,
-                        size: 48, color: Colors.white70),
-                    SizedBox(height: 12),
-                    Text(
-                      '프로필 추가',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                )
-                    : Column(
+                child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     CircleAvatar(
-                      backgroundImage: AssetImage(profile['image']!),
                       radius: 40,
+                      backgroundColor: Colors.grey[800],
+                      backgroundImage: _getImageProvider(profile['imageUrl']),
+                      child: _getImageProvider(profile['imageUrl']) == null
+                          ? const Icon(Icons.person, color: Colors.white30, size: 40)
+                          : null,
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      profile['name']!,
+                      isAddButton ? '프로필 추가' : profile['name'] ?? '',
                       style: const TextStyle(
                         fontSize: 18,
                         color: Colors.white,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    if (isAddButton)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8),
+                        child: Icon(Icons.add_circle_outline, color: Colors.white70, size: 32),
+                      ),
                   ],
                 ),
               ),

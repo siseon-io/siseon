@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_spinkit/flutter_spinkit.dart';
+import 'package:siseon2/services/auth_service.dart'; // AuthService 경로
 import 'profile_select_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -15,6 +16,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
 
+  /// Google accessToken을 백엔드에 전송
   Future<void> sendAccessTokenToBackend(String accessToken) async {
     final url = Uri.parse('http://i13b101.p.ssafy.io:8080/api/auth/google');
     final headers = {'Content-Type': 'application/json'};
@@ -22,7 +24,16 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final response = await http.post(url, headers: headers, body: body);
+
       if (response.statusCode == 200 && mounted) {
+        final data = jsonDecode(response.body);
+
+        final jwtAccessToken = data['accessToken'];
+        final jwtRefreshToken = data['refreshToken'];
+
+        // ✅ 로그인 후 JWT 저장
+        await AuthService.saveTokens(jwtAccessToken, jwtRefreshToken);
+
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const ProfileSelectScreen()),

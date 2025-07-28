@@ -9,10 +9,33 @@ void main() async {
     DeviceOrientation.portraitUp,
   ]);
 
-  runApp(const MaterialApp(
-    debugShowCheckedModeBanner: false,
-    home: SplashScreen(),
-  ));
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        fontFamily: 'Pretendard', // ✅ 폰트 전역 적용
+        scaffoldBackgroundColor: const Color(0xFF0D1117),
+        textTheme: const TextTheme(
+          bodyLarge: TextStyle(color: Colors.white),
+          bodyMedium: TextStyle(color: Colors.white),
+          titleLarge: TextStyle(color: Colors.white),
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFF0D1117),
+          foregroundColor: Colors.white,
+          elevation: 0,
+        ),
+      ),
+      home: const SplashScreen(),
+    );
+  }
 }
 
 class SplashScreen extends StatefulWidget {
@@ -37,33 +60,25 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      backgroundColor: Color(0xFF0D1117), // 💠 고급진 어두운 남색
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 👁️ 눈 아이콘 (열린 상태)
             Image(
               image: AssetImage('assets/images/eye_open.png'),
               width: 100,
               height: 100,
             ),
             SizedBox(height: 24),
-
-            // 💬 앱 이름
             Text(
               'SISEON',
               style: TextStyle(
                 fontSize: 30,
                 fontWeight: FontWeight.w700,
                 letterSpacing: 6,
-                color: Colors.white,
               ),
             ),
-
             SizedBox(height: 12),
-
-            // 💡 슬로건
             Text(
               'Smart Vision for Your Comfort',
               style: TextStyle(
