@@ -24,11 +24,12 @@ public class SocialAuthService {
 
     private final WebClient googleWebClient;
     private final JwtEncoder jwtEncoder;
+    private final JwtDecoder jwtDecoder;
     private final UserRepository userRepository;
 
     @Transactional
     public JwtResponse loginWithGoogle(SocialLoginRequest req) {
-        // 1) Google UserInfo
+        // 1) Google UserInfo 조회
         GoogleUserInfo ui = googleWebClient.get()
                 .headers(h -> h.setBearerAuth(req.accessToken()))
                 .retrieve()
@@ -39,43 +40,60 @@ public class SocialAuthService {
             throw new RuntimeException("Google UserInfo 조회 실패");
         }
 
-        // 2) DB User
+        // 2) DB에 User 저장 또는 조회
         User user = userRepository.findByEmail(ui.email())
                 .orElseGet(() -> {
-                    String name = ui.name() != null
-                            ? ui.name()
-                            : ui.email().split("@")[0];
-                    User u = User.builder()
+                    String name = ui.name() != null ? ui.name() : ui.email().split("@")[0];
+                    User newUser = User.builder()
                             .email(ui.email())
                             .name(name)
                             .pictureUrl(ui.picture())
                             .build();
-                    return userRepository.save(u);
+                    return userRepository.save(newUser);
                 });
 
-        Instant now = Instant.now();
+        // 3) 토큰 생성 및 반환
+        return generateTokens(user.getEmail(), List.of("USER"));
+    }
 
-        // JwsHeader -> HS256
+    @Transactional
+    public JwtResponse refreshToken(String refreshToken) {
+        // 1) Refresh Token Decode & Encode
+        Jwt decodedToken = jwtDecoder.decode(refreshToken);
+        String email = decodedToken.getSubject();
+
+        // 2) DB user
+        userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("사용자가 존재하지 않습니다."));
+
+        // 3) Token Refresh
+        List<String> roles = decodedToken.getClaimAsStringList("roles");
+        return generateTokens(email, roles);
+    }
+
+    private JwtResponse generateTokens(String subject, List<String> roles) {
+        Instant now = Instant.now();
         JwsHeader jwsHeader = JwsHeader.with(MacAlgorithm.HS256).build();
 
-        // 3) Access Token
+        // Access Token (30분)
         JwtClaimsSet accessClaims = JwtClaimsSet.builder()
                 .issuer("siseon")
                 .issuedAt(now)
-                .expiresAt(now.plus(1, ChronoUnit.HOURS))
-                .subject(user.getEmail())
-                .claim("roles", List.of("USER"))
+                .expiresAt(now.plus(2, ChronoUnit.MINUTES))
+                .subject(subject)
+                .claim("roles", roles)
                 .build();
         String accessToken = jwtEncoder.encode(
                 JwtEncoderParameters.from(jwsHeader, accessClaims)
         ).getTokenValue();
 
-        // 4) Refresh Token
+        // Refresh Token (7일)
         JwtClaimsSet refreshClaims = JwtClaimsSet.builder()
                 .issuer("siseon")
                 .issuedAt(now)
-                .expiresAt(now.plus(30, ChronoUnit.DAYS))
-                .subject(user.getEmail())
+                .expiresAt(now.plus(7, ChronoUnit.DAYS))
+                .subject(subject)
+                .claim("roles", roles)
                 .build();
         String refreshToken = jwtEncoder.encode(
                 JwtEncoderParameters.from(jwsHeader, refreshClaims)
