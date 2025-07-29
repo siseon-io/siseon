@@ -10,7 +10,9 @@ class AuthService {
   /// 🔑 accessToken 불러오기
   static Future<String?> getAccessToken() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('accessToken');
+    final token = prefs.getString('accessToken');
+    print('🧩 [getAccessToken] accessToken: $token');
+    return token;
   }
 
   /// 🔑 refreshToken 불러오기
@@ -72,12 +74,7 @@ class AuthService {
     await prefs.remove('accessToken');
     await prefs.remove('refreshToken');
   }
-  /// 🚮 저장된 토큰 전체 삭제 (회원 탈퇴 시 사용)
-  static Future<void> clearTokens() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('accessToken');
-    await prefs.remove('refreshToken');
-  }
+
   /// ✅ 로그인 상태 여부 확인
   static Future<bool> isLoggedIn() async {
     final accessToken = await getAccessToken();
