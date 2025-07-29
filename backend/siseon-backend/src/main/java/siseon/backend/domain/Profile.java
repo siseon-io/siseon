@@ -7,6 +7,8 @@ import siseon.backend.config.JsonConverter;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 @Entity
@@ -52,6 +54,9 @@ public class Profile {
     @Convert(converter = JsonConverter.class)
     @Column(columnDefinition = "TEXT")
     private Map<String, Object> settings;
+
+    @OneToMany(mappedBy = "profile", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<Preset> presets = new ArrayList<>();
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

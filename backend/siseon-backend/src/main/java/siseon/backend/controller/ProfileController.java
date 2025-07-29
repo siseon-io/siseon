@@ -1,5 +1,6 @@
 package siseon.backend.controller;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -22,8 +23,7 @@ public class ProfileController {
     private final UserRepository userRepository;
 
     private User getAuthenticatedUser(Jwt jwt) {
-        // sub 클레임에 이메일이 들어있으므로, getSubject() 사용
-        String email = jwt.getSubject();
+        String email = jwt.getSubject();  // JWT의 sub 클레임 = email
         return userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
     }
@@ -47,7 +47,7 @@ public class ProfileController {
 
     @PostMapping
     public ResponseEntity<ProfileResponse> createProfile(
-            @RequestBody ProfileCreateRequest request,
+            @RequestBody @Valid ProfileCreateRequest request,
             @AuthenticationPrincipal Jwt jwt
     ) {
         User user = getAuthenticatedUser(jwt);
@@ -57,7 +57,7 @@ public class ProfileController {
     @PutMapping("/{id}")
     public ResponseEntity<ProfileResponse> updateProfile(
             @PathVariable Long id,
-            @RequestBody ProfileCreateRequest request,
+            @RequestBody @Valid ProfileCreateRequest request,
             @AuthenticationPrincipal Jwt jwt
     ) {
         User user = getAuthenticatedUser(jwt);
