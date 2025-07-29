@@ -19,9 +19,9 @@ public:
     // 1) ROS2 퍼블리셔 생성
     pub_ = this->create_publisher<std_msgs::msg::String>("eye_pose", 10);
 
-    // 2) person_detection 토픽 구독자 생성
+    // 2) lidar_dist 토픽 구독자 생성
     person_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
-      "person_detection", 10,
+      "lidar_dist", 10,
       std::bind(&EyePosNode::personCallback, this, std::placeholders::_1)
     );
     // 3) UDP 수신 시작
@@ -39,7 +39,7 @@ public:
   }
 
 private:
-  // person_detection 콜백
+  // lidar_dist 콜백
   void personCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
     latest_person_ = *msg;
     has_person_ = true;
