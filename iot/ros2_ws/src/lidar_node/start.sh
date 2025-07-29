@@ -1,0 +1,1 @@
+ros2 launch lidar_node person_detector_launch.py
