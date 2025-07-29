@@ -1,3 +1,4 @@
+// 📁 root_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -7,8 +8,7 @@ import 'pages/stats_page.dart';
 import 'pages/settings/profile_page.dart';
 
 class RootScreen extends StatefulWidget {
-  final String userName;
-  const RootScreen({super.key, required this.userName});
+  const RootScreen({super.key}); // userName 제거
 
   @override
   State<RootScreen> createState() => _RootScreenState();
@@ -22,7 +22,7 @@ class _RootScreenState extends State<RootScreen> {
   void initState() {
     super.initState();
     _pages = [
-      HomeScreen(userName: widget.userName),
+      const HomeScreen(), // 🔥 userName 인자 제거
       const ManualPage(),
       const StatsPage(),
       const ProfilePage(),
@@ -31,22 +31,18 @@ class _RootScreenState extends State<RootScreen> {
 
   Future<void> _selectTab(int idx) async {
     if (idx == 1) {
-      // ManualPage 진입 시: 안내 → 지연 → 가로모드 전환
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('약 3초 뒤에 핸드폰이 가로모드로 변경됩니다.'),
           duration: Duration(seconds: 3),
         ),
       );
-
       await Future.delayed(const Duration(seconds: 3));
-
       await SystemChrome.setPreferredOrientations([
         DeviceOrientation.landscapeRight,
         DeviceOrientation.landscapeLeft,
       ]);
     } else {
-      // 다른 탭: 세로모드로 복구
       await SystemChrome.setPreferredOrientations([
         DeviceOrientation.portraitUp,
       ]);
@@ -60,7 +56,7 @@ class _RootScreenState extends State<RootScreen> {
     return Scaffold(
       body: _pages[_currentIndex],
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _selectTab(2), // StatsPage로 이동
+        onPressed: () => _selectTab(2),
         backgroundColor: Colors.purple,
         child: const Icon(Icons.remove_red_eye, size: 32),
       ),

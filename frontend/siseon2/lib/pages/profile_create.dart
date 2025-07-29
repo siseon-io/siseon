@@ -267,23 +267,40 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
             const SizedBox(height: 16),
             GestureDetector(
               onTap: _pickDate,
-              child: InputDecorator(
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: Colors.grey[900],
-                  prefixIcon: const Icon(Icons.calendar_today, color: Colors.white70),
-                  labelText: dateText,
-                  labelStyle: TextStyle(
-                    color: _birthDate == null ? Colors.white38 : Colors.white,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '생년월일',
+                    style: TextStyle(color: Colors.white70, fontSize: 12),
                   ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[900],
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.calendar_today, color: Colors.white70),
+                        const SizedBox(width: 12),
+                        Text(
+                          _birthDate == null
+                              ? '생년월일 선택'
+                              : DateFormat('yyyy-MM-dd').format(_birthDate!),
+                          style: TextStyle(
+                            color: _birthDate == null ? Colors.white38 : Colors.white,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                child: const SizedBox.shrink(),
+                ],
               ),
             ),
+
             const SizedBox(height: 24),
             Row(
               children: [
