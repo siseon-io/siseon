@@ -17,7 +17,8 @@ public:
             asio::ip::udp::endpoint(asio::ip::udp::v4(), 30080))
   {
     // 1) ROS2 퍼블리셔 생성
-    pub_ = this->create_publisher<std_msgs::msg::String>("eye_fused_json", 10);
+    pub_ = this->create_publisher<std_msgs::msg::String>("eye_pose", 10);
+
     // 2) person_detection 토픽 구독자 생성
     person_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
       "person_detection", 10,
