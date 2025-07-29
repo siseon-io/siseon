@@ -8,6 +8,7 @@ import siseon.backend.domain.User;
 import siseon.backend.dto.ProfileCreateRequest;
 import siseon.backend.dto.ProfileResponse;
 import siseon.backend.repository.ProfileRepository;
+import siseon.backend.repository.UserRepository;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -17,9 +18,12 @@ import java.util.stream.Collectors;
 @Transactional
 public class ProfileService {
 
+    private final UserRepository userRepository;
     private final ProfileRepository profileRepository;
 
+    /** 프로필 생성 */
     public ProfileResponse createProfile(ProfileCreateRequest req, User user) {
+        // DTO -> Entity 변환 및 단방향 세팅
         Profile profile = Profile.builder()
                 .name(req.getName())
                 .birthDate(req.getBirthDate())
@@ -31,21 +35,38 @@ public class ProfileService {
                 .user(user)
                 .build();
 
+        // profile을 직접 저장하여 정상 INSERT 발생
         Profile saved = profileRepository.save(profile);
-        return toDto(saved);
+
+        // 저장된 Entity를 DTO로 변환 후 반환
+        return ProfileResponse.builder()
+                .id(saved.getId())
+                .name(saved.getName())
+                .birthDate(saved.getBirthDate())
+                .height(saved.getHeight())
+                .leftVision(saved.getLeftVision())
+                .rightVision(saved.getRightVision())
+                .imageUrl(saved.getImageUrl())
+                .settings(saved.getSettings())
+                .build();
     }
 
+    /** 프로필 목록 조회 */
+    @Transactional(readOnly = true)
     public List<ProfileResponse> getProfiles(User user) {
         return profileRepository.findAllByUser(user).stream()
                 .map(this::toDto)
                 .collect(Collectors.toList());
     }
 
+    /** 단일 프로필 조회 */
+    @Transactional(readOnly = true)
     public ProfileResponse getProfileById(Long id, User user) {
         Profile profile = getOwnedProfile(id, user);
         return toDto(profile);
     }
 
+    /** 프로필 수정 */
     public ProfileResponse updateProfile(Long id, ProfileCreateRequest req, User user) {
         Profile profile = getOwnedProfile(id, user);
 
@@ -60,6 +81,7 @@ public class ProfileService {
         return toDto(profile);
     }
 
+    /** 프로필 삭제 */
     public void deleteProfile(Long id, User user) {
         Profile profile = getOwnedProfile(id, user);
         profileRepository.delete(profile);
@@ -72,7 +94,6 @@ public class ProfileService {
         if (!profile.getUser().getId().equals(user.getId())) {
             throw new RuntimeException("본인의 프로필만 접근할 수 있습니다.");
         }
-
         return profile;
     }
 

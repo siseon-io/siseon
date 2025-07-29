@@ -9,15 +9,17 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
-
 @Entity
 @Table(name = "users")
-@Getter @Setter
-@NoArgsConstructor @AllArgsConstructor
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
 @Builder
 public class User {
 
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "user_id")
     private Long id;
 
@@ -27,7 +29,7 @@ public class User {
     @Column(nullable = false, length = 100)
     private String name;
 
-    @Column(name = "picture_url")
+    @Column(name = "picture_url", length = 255)
     private String pictureUrl;
 
     @CreationTimestamp
@@ -38,6 +40,17 @@ public class User {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Builder.Default
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Profile> profiles = new ArrayList<>();
+
+    public void addProfile(Profile profile) {
+        profiles.add(profile);
+        profile.setUser(this);
+    }
+
+    public void removeProfile(Profile profile) {
+        profiles.remove(profile);
+        profile.setUser(null);
+    }
 }

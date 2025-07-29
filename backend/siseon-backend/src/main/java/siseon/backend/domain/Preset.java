@@ -21,10 +21,11 @@ public class Preset {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "preset_id")
     private Long presetId;
 
     @NotNull
-    @Column(nullable = false)
+    @Column(name = "device_id", nullable = false)
     private Long deviceId;
 
     @NotNull
@@ -33,9 +34,10 @@ public class Preset {
     private Profile profile;
 
     @NotNull
-    @Column(nullable = false)
+    @Column(nullable = false, length = 100)
     private String name;
 
+    @Lob
     @NotNull
     @Convert(converter = JsonConverter.class)
     @Column(columnDefinition = "JSON", nullable = false)
