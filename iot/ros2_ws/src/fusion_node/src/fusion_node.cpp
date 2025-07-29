@@ -10,7 +10,7 @@ public:
   : Node("fusion_node")
   {
     sub_ = this->create_subscription<std_msgs::msg::String>(
-      "eye_fused_json", 10,
+      "eye_pose", 10,
       std::bind(&FusionNode::on_json, this, std::placeholders::_1)
     );
   }
