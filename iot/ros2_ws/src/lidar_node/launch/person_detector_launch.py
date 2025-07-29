@@ -4,14 +4,14 @@ from launch_ros.actions import Node
 def generate_launch_description():
     return LaunchDescription([
         Node(
-            package='ydlidar_ros2_driver',
+            package='lidar_node',
             executable='ydlidar_ros2_driver_node',
             name='ydlidar_driver',
             output='screen',
             parameters=[],
         ),
         Node(
-            package='ydlidar_ros2_driver',
+            package='lidar_node',
             executable='lidar_node',
             name='lidar_node',
             output='screen',
