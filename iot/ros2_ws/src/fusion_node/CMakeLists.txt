@@ -9,7 +9,25 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+# JSON (header-only)
+find_package(nlohmann_json REQUIRED)
 
+add_executable(fusion_node src/fusion_node.cpp)
+
+# ROS2 패키지 의존성
+ament_target_dependencies(fusion_node
+  rclcpp
+  std_msgs
+)
+
+# Header-only 라이브러리 링크
+target_link_libraries(fusion_node
+  nlohmann_json::nlohmann_json
+)
+
+install(TARGETS fusion_node
+  DESTINATION lib/${PROJECT_NAME}
+)
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
