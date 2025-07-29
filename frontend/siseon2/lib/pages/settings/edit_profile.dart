@@ -1,4 +1,3 @@
-// EditProfilePage.dart - 전체 수정 버전 (선택된 프로필 기준)
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
@@ -26,7 +25,19 @@ class _EditProfilePageState extends State<EditProfilePage> {
   bool _isLoading = true;
   String? _selectedImage;
 
-  final List<String> _availableImages = [
+  /// 🔥 아바타 이름 매핑
+  final Map<String, String> _avatarNames = {
+    'profile_frog': '개구리',
+    'profile_cat': '고양이',
+    'profile_dog': '강아지',
+    'profile_lion': '사자',
+    'profile_mouse': '쥐',
+    'profile_rabbit': '토끼',
+  };
+
+  /// 🔥 기본 이미지(없음) 포함
+  final List<String?> _availableImages = [
+    null,
     'assets/images/profile_frog.png',
     'assets/images/profile_cat.png',
     'assets/images/profile_dog.png',
@@ -121,8 +132,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   children: [
                     Expanded(
                       child: CupertinoPicker(
-                        scrollController: FixedExtentScrollController(
-                            initialItem: selectedYear - 1900),
+                        scrollController: FixedExtentScrollController(initialItem: selectedYear - 1900),
                         itemExtent: 40,
                         onSelectedItemChanged: (index) {
                           selectedYear = 1900 + index;
@@ -130,16 +140,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         children: List.generate(
                           126,
                               (index) => Center(
-                            child: Text('${1900 + index}년',
-                                style: const TextStyle(color: Colors.white)),
+                            child: Text('${1900 + index}년', style: const TextStyle(color: Colors.white)),
                           ),
                         ),
                       ),
                     ),
                     Expanded(
                       child: CupertinoPicker(
-                        scrollController: FixedExtentScrollController(
-                            initialItem: selectedMonth - 1),
+                        scrollController: FixedExtentScrollController(initialItem: selectedMonth - 1),
                         itemExtent: 40,
                         onSelectedItemChanged: (index) {
                           selectedMonth = index + 1;
@@ -147,16 +155,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         children: List.generate(
                           12,
                               (index) => Center(
-                            child: Text('${index + 1}월',
-                                style: const TextStyle(color: Colors.white)),
+                            child: Text('${index + 1}월', style: const TextStyle(color: Colors.white)),
                           ),
                         ),
                       ),
                     ),
                     Expanded(
                       child: CupertinoPicker(
-                        scrollController: FixedExtentScrollController(
-                            initialItem: selectedDay - 1),
+                        scrollController: FixedExtentScrollController(initialItem: selectedDay - 1),
                         itemExtent: 40,
                         onSelectedItemChanged: (index) {
                           selectedDay = index + 1;
@@ -164,8 +170,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         children: List.generate(
                           31,
                               (index) => Center(
-                            child: Text('${index + 1}일',
-                                style: const TextStyle(color: Colors.white)),
+                            child: Text('${index + 1}일', style: const TextStyle(color: Colors.white)),
                           ),
                         ),
                       ),
@@ -177,17 +182,94 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 onPressed: () {
                   setState(() {
                     _birthDate = DateTime(selectedYear, selectedMonth, selectedDay);
-                    _birthDateController.text =
-                        DateFormat('yyyy-MM-dd').format(_birthDate!);
+                    _birthDateController.text = DateFormat('yyyy-MM-dd').format(_birthDate!);
                   });
                   Navigator.pop(context);
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF3B82F6),
-                ),
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3B82F6)),
                 child: const Text('확인'),
               ),
               const SizedBox(height: 10),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showImagePicker() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.black,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          height: 350,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '아바타 선택',
+                style: TextStyle(
+                  fontFamily: 'Pretendard',
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: GridView.builder(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                  ),
+                  itemCount: _availableImages.length,
+                  itemBuilder: (context, index) {
+                    final path = _availableImages[index];
+                    final isSelected = path == _selectedImage;
+
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() => _selectedImage = path);
+                        Navigator.pop(ctx);
+                      },
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: isSelected
+                                  ? Border.all(color: const Color(0xFF3B82F6), width: 3)
+                                  : null,
+                            ),
+                            child: CircleAvatar(
+                              radius: 40,
+                              backgroundColor: Colors.grey[900],
+                              backgroundImage: path != null ? AssetImage(path) : null,
+                              child: path == null
+                                  ? const Icon(Icons.person_off, size: 30, color: Colors.grey)
+                                  : null,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            path == null
+                                ? '없음'
+                                : _avatarNames[path.split('/').last.split('.').first] ?? '아바타',
+                            style: const TextStyle(color: Colors.white70, fontSize: 13),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
             ],
           ),
         );
@@ -240,7 +322,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
     if (response.statusCode == 204 && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('프로필이 삭제 요청되었습니다.')),
+        const SnackBar(content: Text('프로필이 삭제되었습니다.')),
       );
       Navigator.pushAndRemoveUntil(
         context,
@@ -282,12 +364,11 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 onTap: _showImagePicker,
                 child: CircleAvatar(
                   radius: 48,
-                  backgroundImage: AssetImage(
-                    (_selectedImage != null && _selectedImage!.isNotEmpty)
-                        ? _selectedImage!
-                        : 'assets/images/user_placeholder.png',
-                  ),
                   backgroundColor: Colors.grey[700],
+                  backgroundImage: _selectedImage != null ? AssetImage(_selectedImage!) : null,
+                  child: _selectedImage == null
+                      ? const Icon(Icons.person, size: 50, color: Colors.white30)
+                      : null,
                 ),
               ),
             ),
@@ -367,38 +448,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
           ),
         ),
       ),
-    );
-  }
-
-  void _showImagePicker() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.grey[900],
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return GridView.count(
-          crossAxisCount: 3,
-          shrinkWrap: true,
-          padding: const EdgeInsets.all(16),
-          children: _availableImages.map((path) {
-            return GestureDetector(
-              onTap: () {
-                setState(() => _selectedImage = path);
-                Navigator.pop(context);
-              },
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: CircleAvatar(
-                  backgroundImage: AssetImage(path),
-                  radius: 30,
-                ),
-              ),
-            );
-          }).toList(),
-        );
-      },
     );
   }
 
