@@ -1,72 +1,3 @@
-// #include <rclcpp/rclcpp.hpp>
-// #include <geometry_msgs/msg/point.hpp>
-// #include <nlohmann/json.hpp>
-// #include <websocketpp/config/asio_no_tls_client.hpp>
-// #include <websocketpp/client.hpp>
-// #include <std_msgs/msg/float32.hpp>
-// #include <cmath>
-
-// using websocketpp::connection_hdl;
-// using json = nlohmann::json;
-
-// class EyePosNode : public rclcpp::Node {
-// public:
-//   EyePosNode()
-//   : Node("eye_pos_node"), latest_lidar_(std::nanf("1")) {
-//     // // LiDAR 구독
-//     // lidar_sub_ = this->create_subscription<std_msgs::msg::Float32>(
-//     //   "/lidar_dist", 10,
-//     //   std::bind(&EyePosNode::lidarCallback, this, std::placeholders::_1)
-//     // );
-//     // 웹소켓 클라이언트
-//     client_.init_asio();
-//     client_.set_message_handler(
-//       std::bind(&EyePosNode::onWebsocket, this, std::placeholders::_1, std::placeholders::_2)
-//     );
-//     client_.start_perpetual();
-//     ws_thread_ = std::thread([this](){
-//       auto con = client_.get_connection("ws://10.0.0.2:30080", ec_);
-//       client_.connect(con);
-//       client_.run();
-//     });
-//   }
-//   ~EyePosNode() {
-//     client_.stop_perpetual();
-//     ws_thread_.join();
-//   }
-// private:
-//   void lidarCallback(const std_msgs::msg::Float32::SharedPtr msg) {
-//     // latest_lidar_ = msg->data;
-//     latest_lidar_ = 1;
-//   }
-//   void onWebsocket(connection_hdl, websocketpp::config::asio_client::message_type::ptr m) {
-//     try {
-//     //   auto j = json::parse(m->get_payload());
-//     //   float x = j.at("x");
-//     //   float z = j.at("z");
-//     //   if (std::isnan(latest_lidar_)) return;
-//     //   json out = { {"x", 1}, {"y", latest_lidar_}, {"z", 1} };
-//     //   RCLCPP_INFO(this->get_logger(), "Fused JSON: %s", out.dump().c_str());
-//     json out = { {"x",1}, {"y",1}, {"z",1} };
-//     RCLCPP_INFO(this->get_logger(), "Fused JSON: %s", out.dump().c_str());
-//     } catch(const std::exception &e) {
-//       RCLCPP_ERROR(this->get_logger(), "JSON parse error: %s", e.what());
-//     }
-//   }
-// //   rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr lidar_sub_;
-// //   float latest_lidar_;
-//   websocketpp::client<websocketpp::config::asio_client> client_;
-//   websocketpp::lib::error_code ec_;
-//   std::thread ws_thread_;
-// };
-
-// int main(int argc, char **argv) {
-//   rclcpp::init(argc, argv);
-//   rclcpp::spin(std::make_shared<EyePosNode>());
-//   rclcpp::shutdown();
-//   return 0;
-// }
-
 #include <rclcpp/rclcpp.hpp>
 #include <nlohmann/json.hpp>
 #include <asio.hpp>               // standalone Asio
@@ -110,10 +41,13 @@ private:
     std::string payload(buf_.data(), length);
     try {
       auto j = json::parse(payload);
-      float x = j.at("x");
-      float z = j.at("z");
-      float y = 1.0f;  // 테스트용 하드코딩
-      json out = { {"x", x}, {"y", y}, {"z", z} };
+      float left_x = j.at("lepupil_x");
+      float left_z = j.at("lepupil_y");
+      float right_x = j.at("repupil_x");
+      float right_z = j.at("repupil_y");
+      float y = 1.0f;  // 테스트용 하드코드
+      if(left_x == null || right_x == null || left_z == null || right_z == null || y == null) return;
+      json out = { {"lefteye_x", left_x}, {"lefteye_z", left_z},{"righteye_x",right_x},{"righteye_z",right_z}, {"y", y} };
       RCLCPP_INFO(get_logger(), "Fused JSON: %s", out.dump().c_str());
     } catch (const std::exception &e) {
       RCLCPP_ERROR(get_logger(), "JSON parse error: %s", e.what());
