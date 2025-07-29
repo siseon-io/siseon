@@ -20,6 +20,16 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
   String _visionLeft = '';
   String _visionRight = '';
 
+  /// 🔥 아바타 이름 매핑
+  final Map<String, String> _avatarNames = {
+    'profile_frog': '개구리',
+    'profile_cat': '고양이',
+    'profile_dog': '강아지',
+    'profile_lion': '사자',
+    'profile_mouse': '쥐',
+    'profile_rabbit': '토끼',
+  };
+
   final List<String?> _avatarOptions = [
     null,
     'assets/images/profile_frog.png',
@@ -63,7 +73,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                           selectedYear = 1900 + index;
                         },
                         children: List.generate(
-                          126, // 1900 ~ 2025
+                          126,
                               (index) => Center(
                             child: Text('${1900 + index}년',
                                 style: TextStyle(color: Colors.white)),
@@ -129,53 +139,87 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
   }
 
   void _showAvatarPicker() {
-    showDialog(
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('아바타 선택'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: _avatarOptions.map((path) {
-                final label = path == null ? '없음' : path.split('/').last.split('.').first;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      InkWell(
-                        onTap: () {
-                          setState(() => _selectedAvatar = path);
-                          Navigator.pop(ctx);
-                        },
-                        borderRadius: BorderRadius.circular(40),
-                        child: CircleAvatar(
-                          radius: 40,
-                          backgroundColor: Colors.grey[200],
-                          backgroundImage: path != null ? AssetImage(path) : null,
-                          child: path == null
-                              ? const Icon(Icons.person_off, size: 30, color: Colors.grey)
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(label),
-                    ],
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('닫기'),
-          ),
-        ],
+      backgroundColor: Colors.black,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      builder: (ctx) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          height: 350,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '아바타 선택',
+                style: TextStyle(
+                  fontFamily: 'Pretendard',
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: GridView.builder(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                  ),
+                  itemCount: _avatarOptions.length,
+                  itemBuilder: (context, index) {
+                    final path = _avatarOptions[index];
+                    final isSelected = path == _selectedAvatar;
+
+                    return GestureDetector(
+                      onTap: () {
+                        setState(() => _selectedAvatar = path);
+                        Navigator.pop(ctx);
+                      },
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: isSelected
+                                  ? Border.all(color: const Color(0xFF3B82F6), width: 3)
+                                  : null,
+                            ),
+                            child: CircleAvatar(
+                              radius: 40,
+                              backgroundColor: Colors.grey[900],
+                              backgroundImage: path != null ? AssetImage(path) : null,
+                              child: path == null
+                                  ? const Icon(Icons.person_off,
+                                  size: 30, color: Colors.grey)
+                                  : null,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            path == null
+                                ? '없음'
+                                : _avatarNames[path.split('/').last.split('.').first] ??
+                                '아바타',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -215,10 +259,6 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final dateText = _birthDate == null
-        ? '생년월일 선택'
-        : DateFormat('yyyy-MM-dd').format(_birthDate!);
-
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
@@ -300,7 +340,6 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                 ],
               ),
             ),
-
             const SizedBox(height: 24),
             Row(
               children: [
