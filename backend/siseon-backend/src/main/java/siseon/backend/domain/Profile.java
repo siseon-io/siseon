@@ -3,6 +3,8 @@ package siseon.backend.domain;
 import jakarta.persistence.*;
 import jakarta.validation.constraints.NotNull;
 import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 import siseon.backend.config.JsonConverter;
 
 import java.time.LocalDate;
@@ -12,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 
 @Entity
+@Table(name = "profile")
 @Getter
 @Setter
 @NoArgsConstructor
@@ -21,10 +24,11 @@ public class Profile {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "profile_id")
     private Long id;
 
     @NotNull
-    @Column(nullable = false)
+    @Column(nullable = false, length = 100)
     private String name;
 
     @NotNull
@@ -36,13 +40,14 @@ public class Profile {
     private Float height;
 
     @NotNull
-    @Column(nullable = false, name = "left_vision")
+    @Column(name = "left_vision", nullable = false)
     private Float leftVision;
 
     @NotNull
-    @Column(nullable = false, name = "right_vision")
+    @Column(name = "right_vision", nullable = false)
     private Float rightVision;
 
+    @Column(name = "image_url", length = 255)
     private String imageUrl;
 
     @NotNull
@@ -52,27 +57,28 @@ public class Profile {
 
     @Lob
     @Convert(converter = JsonConverter.class)
-    @Column(columnDefinition = "TEXT")
+    @Column(columnDefinition = "JSON")
     private Map<String, Object> settings;
 
+    @Builder.Default
     @OneToMany(mappedBy = "profile", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Preset> presets = new ArrayList<>();
 
+    @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
+    @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    @PrePersist
-    protected void onCreate() {
-        LocalDateTime now = LocalDateTime.now();
-        createdAt = now;
-        updatedAt = now;
+    public void addPreset(Preset preset) {
+        presets.add(preset);
+        preset.setProfile(this);
     }
 
-    @PreUpdate
-    protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
+    public void removePreset(Preset preset) {
+        presets.remove(preset);
+        preset.setProfile(null);
     }
 }
