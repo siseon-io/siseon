@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:app_settings/app_settings.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
 import 'package:siseon2/services/preset_service.dart';
+import 'ble_scan_screen.dart'; // ✅ BLE 스캔 화면으로 이동하기 위해 import
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,34 +16,38 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _profile;
   List<Map<String, dynamic>> _presets = [];
+  bool _isBluetoothOn = false;
 
   static const Color primaryBlue = Colors.blue;
   static const Color black = Colors.black;
-  static const Color greyText = Colors.black54;
 
   @override
   void initState() {
     super.initState();
     _loadProfileAndPresets();
+    _checkBluetoothState();
+  }
+
+  Future<void> _checkBluetoothState() async {
+    final isOn = await FlutterBluePlus.isOn;
+    setState(() => _isBluetoothOn = isOn);
   }
 
   Future<void> _loadProfileAndPresets() async {
     final profile = await ProfileCacheService.loadProfile();
     if (profile == null) return;
-
-    final profileId = profile['id'];
-    final presets = await PresetService.fetchPresets(profileId);
+    final presets = await PresetService.fetchPresets(profile['id']);
 
     setState(() {
       _profile = profile;
-      _presets = presets.take(3).toList(); // ✅ 프리셋 3개까지만 유지
+      _presets = presets.take(3).toList();
     });
   }
 
   Future<void> _addPreset() async {
     if (_presets.length >= 3) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('❌ 프리셋은 최대 3개까지 가능합니다')),
+        const SnackBar(content: Text('❌ 프리셋은 최대 3개까지')),
       );
       return;
     }
@@ -51,7 +59,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (created != null) {
       await _loadProfileAndPresets();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('✅ $dummyName이 추가되었습니다')),
+        SnackBar(content: Text('✅ $dummyName 추가됨')),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -60,6 +68,33 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _handleDisconnectAndScan() async {
+    final bluetooth = await Permission.bluetoothConnect.request();
+    final scan = await Permission.bluetoothScan.request();
+    final location = await Permission.location.request();
+
+    final allGranted = bluetooth.isGranted && scan.isGranted && location.isGranted;
+    if (!allGranted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('❌ BLE 권한이 필요합니다')),
+      );
+      return;
+    }
+
+    final isOn = await FlutterBluePlus.isOn;
+    if (!isOn) {
+      await FlutterBluePlus.turnOn();
+      await AppSettings.openAppSettings(); // ✅ 여기!
+      return;
+    }
+
+    // ✅ BLE 스캔 화면으로 이동
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const BleScanScreen()),
+    );
+  }
   @override
   Widget build(BuildContext context) {
     if (_profile == null) {
@@ -74,24 +109,39 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: const Text('홈'),
-        backgroundColor: primaryBlue,
-      ),
+      appBar: AppBar(title: const Text('홈'), backgroundColor: primaryBlue),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Column(
           children: [
+            const SizedBox(height: 20),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                ElevatedButton(
+                  onPressed: _isBluetoothOn ? null : AppSettings.openAppSettings,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _isBluetoothOn ? Colors.grey : primaryBlue,
+                  ),
+                  child: Text(_isBluetoothOn ? 'Connected' : 'Connect Bluetooth'),
+                ),
+                const SizedBox(width: 20),
+                ElevatedButton(
+                  onPressed: _handleDisconnectAndScan,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.redAccent,
+                  ),
+                  child: const Text('Disconnect'),
+                ),
+              ],
+            ),
             const SizedBox(height: 20),
             Center(
               child: Column(
                 children: [
                   Image.asset('assets/images/profile_$avatar.png', width: 100),
                   const SizedBox(height: 12),
-                  Text(
-                    '안녕하세요, $nickname님!',
-                    style: const TextStyle(fontSize: 24, color: black),
-                  ),
+                  Text('안녕하세요, $nickname님!', style: const TextStyle(fontSize: 24, color: black)),
                 ],
               ),
             ),
@@ -107,17 +157,10 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 32),
             const Align(
               alignment: Alignment.centerLeft,
-              child: Text(
-                '프리셋',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: black),
-              ),
+              child: Text('프리셋', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: black)),
             ),
             const SizedBox(height: 12),
-            Expanded(
-              child: Center(
-                child: _buildPresetArea(),
-              ),
-            ),
+            Expanded(child: Center(child: _buildPresetArea())),
           ],
         ),
       ),
@@ -125,7 +168,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildPresetArea() {
-    // ✅ 프리셋이 없는 경우 → 중앙에 + 버튼만
     if (_presets.isEmpty) {
       return IconButton(
         icon: const Icon(Icons.add_circle, size: 60, color: primaryBlue),
@@ -133,44 +175,29 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // ✅ 프리셋이 1~2개인 경우 → 좌측 프리셋, 우측에 +버튼
+    final buttons = _presets.asMap().entries.map((entry) {
+      final index = entry.key;
+      final name = '프리셋 ${index + 1}';
+      return Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: _presetButton(name),
+        ),
+      );
+    }).toList();
+
     if (_presets.length < 3) {
-      return Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          ..._presets.asMap().entries.map((entry) {
-            final index = entry.key;
-            final presetName = '프리셋 ${index + 1}';
-            return Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                child: _presetButton(presetName),
-              ),
-            );
-          }),
-          Expanded(
-            child: IconButton(
-              icon: const Icon(Icons.add_circle, size: 50, color: primaryBlue),
-              onPressed: _addPreset,
-            ),
+      buttons.add(
+        Expanded(
+          child: IconButton(
+            icon: const Icon(Icons.add_circle, size: 50, color: primaryBlue),
+            onPressed: _addPreset,
           ),
-        ],
+        ),
       );
     }
 
-    // ✅ 프리셋이 3개인 경우 → 균등 꽉채움
-    return Row(
-      children: _presets.asMap().entries.map((entry) {
-        final index = entry.key;
-        final presetName = '프리셋 ${index + 1}';
-        return Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: _presetButton(presetName),
-          ),
-        );
-      }).toList(),
-    );
+    return Row(mainAxisAlignment: MainAxisAlignment.center, children: buttons);
   }
 
   Widget _presetButton(String name) {
@@ -181,13 +208,8 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.symmetric(vertical: 14),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
-      onPressed: () {
-        print('📌 선택된 프리셋: $name');
-      },
-      child: Text(
-        name,
-        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-      ),
+      onPressed: () => print('📌 선택된 프리셋: $name'),
+      child: Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
     );
   }
 }
