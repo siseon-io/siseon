@@ -22,6 +22,12 @@ class _ProfilePageState extends State<ProfilePage> {
   int? _selectedProfileId;
   bool _isLoading = true;
 
+  static const Color backgroundBlack = Color(0xFF0D1117);
+  static const Color cardGrey = Color(0xFF161B22);
+  static const Color primaryBlue = Color(0xFF3B82F6);
+  static const Color textWhite = Colors.white;
+  static const Color textGrey = Colors.white70;
+
   @override
   void initState() {
     super.initState();
@@ -77,7 +83,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  /// 회원 탈퇴 API 호출
   Future<void> _deleteUser() async {
     final token = await AuthService.getValidAccessToken();
     if (token == null) return;
@@ -105,19 +110,15 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  /// 회원 탈퇴 팝업
   void _showDeleteUserDialog() {
     showDialog(
       context: context,
-      barrierDismissible: true, // 바깥 클릭 시 취소
+      barrierDismissible: true,
       builder: (_) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: cardGrey,
         child: Container(
           padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -127,7 +128,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   fontFamily: 'Pretendard',
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
-                  color: Colors.black,
+                  color: Colors.white,
                 ),
               ),
               const SizedBox(height: 12),
@@ -136,7 +137,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 style: TextStyle(
                   fontFamily: 'Pretendard',
                   fontSize: 15,
-                  color: Colors.black54,
+                  color: Colors.white70,
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -147,18 +148,18 @@ class _ProfilePageState extends State<ProfilePage> {
                     child: OutlinedButton(
                       onPressed: () => Navigator.pop(context),
                       style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFF3B82F6)),
+                        side: BorderSide(color: primaryBlue),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
-                      child: const Text(
+                      child: Text(
                         '취소',
                         style: TextStyle(
                           fontFamily: 'Pretendard',
                           fontSize: 16,
-                          color: Color(0xFF3B82F6),
+                          color: primaryBlue,
                         ),
                       ),
                     ),
@@ -198,101 +199,24 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _buildMenuItem(IconData icon, String text, VoidCallback onTap) {
-    return ListTile(
-      leading: CircleAvatar(
-        radius: 20,
-        backgroundColor: const Color(0xFFE5E7EB),
-        child: Icon(icon, color: const Color(0xFF2563FF)),
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
+      decoration: BoxDecoration(
+        color: cardGrey,
+        borderRadius: BorderRadius.circular(12),
       ),
-      title: Text(text, style: const TextStyle(fontSize: 16, fontFamily: 'Pretendard')),
-      trailing: const Icon(Icons.chevron_right, color: Colors.grey),
-      onTap: onTap,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        actions: [
-          TextButton(
-            onPressed: _showDeleteUserDialog,
-            child: const Text(
-              '회원 탈퇴',
-              style: TextStyle(
-                fontFamily: 'Pretendard',
-                fontSize: 14,
-                color: Colors.red,
-              ),
-            ),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Material(
-          color: Colors.white,
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : ListView(
-            padding: const EdgeInsets.symmetric(vertical: 24),
-            children: [
-              Center(
-                child: CircleAvatar(
-                  radius: 50,
-                  backgroundColor: const Color(0xFFE5E7EB),
-                  backgroundImage: (_imageUrl != null && _imageUrl!.isNotEmpty)
-                      ? AssetImage(_imageUrl!)
-                      : null,
-                  child: (_imageUrl == null || _imageUrl!.isEmpty)
-                      ? const Icon(Icons.person, size: 50, color: Colors.white)
-                      : null,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Center(
-                child: Text(
-                  _name ?? '사용자',
-                  style: const TextStyle(
-                    fontFamily: 'Pretendard',
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 32),
-              _buildMenuItem(Icons.account_circle, '프로필 변경', () {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ProfileSelectScreen()),
-                );
-              }),
-              _buildMenuItem(Icons.edit, '프로필 수정', () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const EditProfilePage()),
-                ).then((_) => _fetchProfile());
-              }),
-              _buildMenuItem(Icons.favorite, '프리셋', () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const PresetPage()),
-                );
-              }),
-              _buildMenuItem(Icons.system_update_alt, '펌웨어 업데이트', () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const UpdatePage()),
-                );
-              }),
-              _buildMenuItem(Icons.logout, '로그아웃', () {
-                _showLogoutDialog();
-              }),
-            ],
+      child: ListTile(
+        leading: Icon(icon, color: primaryBlue),
+        title: Text(
+          text,
+          style: const TextStyle(
+            fontSize: 16,
+            fontFamily: 'Pretendard',
+            color: Colors.white,
           ),
         ),
+        trailing: const Icon(Icons.chevron_right, color: Colors.white38),
+        onTap: onTap,
       ),
     );
   }
@@ -303,12 +227,9 @@ class _ProfilePageState extends State<ProfilePage> {
       barrierDismissible: true,
       builder: (_) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: cardGrey,
         child: Container(
           padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -318,7 +239,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   fontFamily: 'Pretendard',
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
-                  color: Colors.black,
+                  color: Colors.white,
                 ),
               ),
               const SizedBox(height: 24),
@@ -328,18 +249,18 @@ class _ProfilePageState extends State<ProfilePage> {
                     child: OutlinedButton(
                       onPressed: () => Navigator.pop(context),
                       style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFF3B82F6)),
+                        side: BorderSide(color: primaryBlue),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
-                      child: const Text(
+                      child: Text(
                         '취소',
                         style: TextStyle(
                           fontFamily: 'Pretendard',
                           fontSize: 16,
-                          color: Color(0xFF3B82F6),
+                          color: primaryBlue,
                         ),
                       ),
                     ),
@@ -356,7 +277,7 @@ class _ProfilePageState extends State<ProfilePage> {
                         );
                       },
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF3B82F6),
+                        backgroundColor: primaryBlue,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
@@ -378,6 +299,89 @@ class _ProfilePageState extends State<ProfilePage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: backgroundBlack,
+      appBar: AppBar(
+        backgroundColor: backgroundBlack,
+        elevation: 0,
+        actions: [
+          TextButton(
+            onPressed: _showDeleteUserDialog,
+            child: const Text(
+              '회원 탈퇴',
+              style: TextStyle(
+                fontFamily: 'Pretendard',
+                fontSize: 14,
+                color: Colors.red,
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: Colors.white))
+          : ListView(
+        children: [
+          const SizedBox(height: 16),
+          Center(
+            child: CircleAvatar(
+              radius: 50,
+              backgroundColor: Colors.grey[800],
+              backgroundImage: (_imageUrl != null && _imageUrl!.isNotEmpty)
+                  ? AssetImage(_imageUrl!)
+                  : null,
+              child: (_imageUrl == null || _imageUrl!.isEmpty)
+                  ? const Icon(Icons.person, size: 50, color: Colors.white)
+                  : null,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: Text(
+              _name ?? '사용자',
+              style: const TextStyle(
+                fontFamily: 'Pretendard',
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          _buildMenuItem(Icons.account_circle, '프로필 변경', () {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const ProfileSelectScreen()),
+            );
+          }),
+          _buildMenuItem(Icons.edit, '프로필 수정', () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const EditProfilePage()),
+            ).then((_) => _fetchProfile());
+          }),
+          _buildMenuItem(Icons.favorite, '프리셋', () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const PresetPage()),
+            );
+          }),
+          _buildMenuItem(Icons.system_update_alt, '펌웨어 업데이트', () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const UpdatePage()),
+            );
+          }),
+          _buildMenuItem(Icons.logout, '로그아웃', () {
+            _showLogoutDialog();
+          }),
+        ],
       ),
     );
   }

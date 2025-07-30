@@ -37,10 +37,17 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
       );
 
       print('📦 [응답 상태코드] ${response.statusCode}');
-      print('📦 [utf8 디코딩 결과] ${utf8.decode(response.bodyBytes)}');
+      print('📦 [raw body] ${response.body}');
+      print('📦 [bodyBytes] ${response.bodyBytes}');
 
       if (response.statusCode == 200) {
-        final List data = jsonDecode(utf8.decode(response.bodyBytes));
+        // utf8 디코딩 로그
+        final decoded = utf8.decode(response.bodyBytes);
+        print('📦 [utf8 디코딩 결과] $decoded');
+
+        final List data = jsonDecode(decoded);
+        print('📦 [파싱된 JSON] $data');
+
         setState(() {
           _profiles = List<Map<String, dynamic>>.from(data);
           _isLoading = false;
@@ -79,7 +86,7 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
   }
 
   Future<void> onProfileSelected(Map<String, dynamic> profile) async {
-    await ProfileCacheService.saveProfile(profile);
+    await ProfileCacheService.saveProfile(profile); // ✅ 선택된 프로필 캐싱
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (_) => const RootScreen()),
@@ -134,32 +141,30 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
                   border: Border.all(color: Colors.white24, width: 1),
                 ),
                 child: Column(
-                  mainAxisSize: MainAxisSize.min, // ✅ overflow 방지 핵심
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     CircleAvatar(
-                      radius: 36, // ✅ 약간 줄이기
+                      radius: 40,
                       backgroundColor: Colors.grey[800],
                       backgroundImage: _getImageProvider(profile['imageUrl']),
                       child: _getImageProvider(profile['imageUrl']) == null
-                          ? const Icon(Icons.person, color: Colors.white30, size: 36)
+                          ? const Icon(Icons.person, color: Colors.white30, size: 40)
                           : null,
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 12),
                     Text(
                       isAddButton ? '프로필 추가' : (profile['name'] ?? ''),
                       style: const TextStyle(
-                        fontFamily: 'Pretendard',
-                        fontSize: 16, // ✅ 조금 줄임
+                        fontFamily: 'Pretendard', // 👉 이걸 명시해줘야 진짜 적용됨
+                        fontSize: 18,
                         color: Colors.white,
                         fontWeight: FontWeight.w600,
                       ),
-                      overflow: TextOverflow.ellipsis,
                     ),
                     if (isAddButton)
                       const Padding(
-                        padding: EdgeInsets.only(top: 6),
-                        child: Icon(Icons.add_circle_outline, color: Colors.white70, size: 24),
+                        padding: EdgeInsets.only(top: 8),
+                        child: Icon(Icons.add_circle_outline, color: Colors.white70, size: 32),
                       ),
                   ],
                 ),
