@@ -5,12 +5,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import siseon.backend.domain.Preset;
 import siseon.backend.domain.Profile;
+import siseon.backend.dto.PresetCoordinate;
 import siseon.backend.dto.PresetRequest;
 import siseon.backend.dto.PresetResponse;
 import siseon.backend.repository.PresetRepository;
 import siseon.backend.repository.ProfileRepository;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
@@ -21,7 +23,6 @@ public class PresetService {
     private final ProfileRepository profileRepository;
     private final PresetRepository presetRepository;
 
-    /** 프리셋 생성 */
     public PresetResponse createPreset(PresetRequest request) {
         Profile profile = profileRepository.findById(request.getProfileId())
                 .orElseThrow(() -> new IllegalArgumentException("해당 프로필이 존재하지 않습니다."));
@@ -39,14 +40,12 @@ public class PresetService {
         return PresetResponse.fromEntity(preset);
     }
 
-    /** 프로필별 프리셋 조회 */
     public List<PresetResponse> getPresetsByProfile(Long profileId) {
         return presetRepository.findByProfile_Id(profileId).stream()
                 .map(PresetResponse::fromEntity)
                 .collect(Collectors.toList());
     }
 
-    /** 프리셋 수정 */
     public PresetResponse updatePreset(Long presetId, PresetRequest request) {
         Preset preset = presetRepository.findById(presetId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 프리셋이 존재하지 않습니다."));
@@ -70,7 +69,6 @@ public class PresetService {
         return PresetResponse.fromEntity(presetRepository.save(preset));
     }
 
-    /** 프리셋 삭제 */
     public void deletePreset(Long presetId) {
         Preset preset = presetRepository.findById(presetId)
                 .orElseThrow(() -> new IllegalArgumentException("해당 프리셋이 존재하지 않습니다."));
@@ -79,5 +77,28 @@ public class PresetService {
         // 편의 메서드로 양방향 연관관계 해제
         profile.removePreset(preset);
         profileRepository.save(profile);  // cascade로 preset 삭제
+    }
+
+    @Transactional(readOnly = true)
+    public PresetResponse getPresetResponse(Long presetId) {
+        return presetRepository.findById(presetId)
+                .map(PresetResponse::fromEntity)
+                .orElseThrow(() -> new IllegalArgumentException("해당 프리셋이 존재하지 않습니다. id=" + presetId));
+    }
+
+    @Transactional(readOnly = true)
+    public PresetCoordinate getPresetCoordinate(Long profileId) {
+        Preset preset = presetRepository.findByProfile_Id(profileId).stream()
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "해당 프로필의 프리셋이 없습니다. id=" + profileId));
+
+        @SuppressWarnings("unchecked")
+        var posMap = (Map<String, Object>) preset.getPosition();
+        double x = ((Number) posMap.get("x")).doubleValue();
+        double y = ((Number) posMap.get("y")).doubleValue();
+        double z = ((Number) posMap.get("z")).doubleValue();
+
+        return new PresetCoordinate(x, y, z);
     }
 }
