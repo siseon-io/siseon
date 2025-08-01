@@ -18,4 +18,5 @@ public class ProfileResponse {
     private Float rightVision;
     private String imageUrl;
     private Map<String, Object> settings;
+    private String fcmToken;
 }

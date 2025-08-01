@@ -35,3 +35,6 @@ app:
 logging:
   level:
     org.springframework.security: DEBUG
+
+firebase:
+  service-account-file: classpath:firebase/serviceAccountKey.json

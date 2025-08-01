@@ -21,7 +21,6 @@ public class ProfileService {
     private final UserRepository userRepository;
     private final ProfileRepository profileRepository;
 
-    /** 프로필 생성 */
     public ProfileResponse createProfile(ProfileCreateRequest req, User user) {
         // DTO -> Entity 변환 및 단방향 세팅
         Profile profile = Profile.builder()
@@ -51,7 +50,6 @@ public class ProfileService {
                 .build();
     }
 
-    /** 프로필 목록 조회 */
     @Transactional(readOnly = true)
     public List<ProfileResponse> getProfiles(User user) {
         return profileRepository.findAllByUser(user).stream()
@@ -59,14 +57,12 @@ public class ProfileService {
                 .collect(Collectors.toList());
     }
 
-    /** 단일 프로필 조회 */
     @Transactional(readOnly = true)
     public ProfileResponse getProfileById(Long id, User user) {
         Profile profile = getOwnedProfile(id, user);
         return toDto(profile);
     }
 
-    /** 프로필 수정 */
     public ProfileResponse updateProfile(Long id, ProfileCreateRequest req, User user) {
         Profile profile = getOwnedProfile(id, user);
 
@@ -81,10 +77,14 @@ public class ProfileService {
         return toDto(profile);
     }
 
-    /** 프로필 삭제 */
     public void deleteProfile(Long id, User user) {
         Profile profile = getOwnedProfile(id, user);
         profileRepository.delete(profile);
+    }
+
+    public void updateFcmToken(Long id, String fcmToken, User user) {
+        Profile profile = getOwnedProfile(id, user);
+        profile.setFcmToken(fcmToken);
     }
 
     private Profile getOwnedProfile(Long id, User user) {
@@ -107,6 +107,7 @@ public class ProfileService {
                 .rightVision(p.getRightVision())
                 .imageUrl(p.getImageUrl())
                 .settings(p.getSettings())
+                .fcmToken(p.getFcmToken())
                 .build();
     }
 }

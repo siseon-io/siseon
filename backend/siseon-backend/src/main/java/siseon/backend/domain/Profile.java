@@ -60,6 +60,9 @@ public class Profile {
     @Column(columnDefinition = "JSON")
     private Map<String, Object> settings;
 
+    @Column(name = "fcm_token", length = 512)
+    private String fcmToken;
+
     @Builder.Default
     @OneToMany(mappedBy = "profile", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Preset> presets = new ArrayList<>();
