@@ -18,6 +18,12 @@ spring:
         format_sql: true
         dialect: org.hibernate.dialect.MySQLDialect
 
+  mqtt:
+    host: tcp://i13b101.p.ssafy.io:1883
+    client-id: siseon-backend
+    username: ${MQTT_USER}
+    password: ${MQTT_PASS}
+
 app:
   oauth2:
     google:

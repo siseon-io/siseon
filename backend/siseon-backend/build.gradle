@@ -26,6 +26,8 @@ repositories {
 dependencies {
     // ▶ Spring Web
     implementation 'org.springframework.boot:spring-boot-starter-web'
+    // ▶ Spring Websocket
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
     // ▶ Spring Security
     implementation 'org.springframework.boot:spring-boot-starter-security'
     // ▶ JWT Encoder/Decoder
@@ -38,9 +40,17 @@ dependencies {
     // ▶ JPA + MySQL
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     runtimeOnly 'com.mysql:mysql-connector-j'
+    // ▶ JSON Serialization
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
     // ▶ Boilerplate
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
+    // ▶ Validate
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // ▶ MQTT Integration
+    implementation 'org.springframework.boot:spring-boot-starter-integration'
+    implementation 'org.springframework.integration:spring-integration-mqtt'
+    implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
     // ▶ Test
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'io.projectreactor:reactor-test'
@@ -48,6 +58,8 @@ dependencies {
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
     // ▶ Swagger
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.2.0'
+    // ▶ Firebase
+    implementation 'com.google.firebase:firebase-admin:9.2.0'
 }
 
 tasks.named('test') {
