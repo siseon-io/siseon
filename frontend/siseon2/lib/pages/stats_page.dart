@@ -6,11 +6,20 @@ class StatsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('통계')),
+      appBar: AppBar(
+        title: const Text('통계'),
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+      ),
+      backgroundColor: Colors.black,
       body: const Center(
         child: Text(
-          'Stats Page',
-          style: TextStyle(fontSize: 24),
+          '📊 업데이트 예정입니다!',
+          style: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.bold,
+            color: Colors.redAccent,
+          ),
         ),
       ),
     );

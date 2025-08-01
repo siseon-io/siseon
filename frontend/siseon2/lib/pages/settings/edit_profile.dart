@@ -311,6 +311,31 @@ class _EditProfilePageState extends State<EditProfilePage> {
     }
   }
 
+  Future<void> _confirmDelete() async {
+    final name = _nameController.text.isNotEmpty ? _nameController.text : '이';
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('프로필 삭제'),
+        content: Text('$name님의 프로필을 삭제하시겠습니까?'),
+        actions: [
+          // ✅ "예"를 왼쪽에 배치
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('예', style: TextStyle(color: Colors.red)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('아니오'),
+          ),
+        ],
+      ),
+    );
+    if (shouldDelete == true) {
+      await _deleteProfile();
+    }
+  }
+
   Future<void> _deleteProfile() async {
     final token = await AuthService.getValidAccessToken();
     if (token == null || _profileId == null) return;
@@ -347,7 +372,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
         title: const Text('프로필 수정', style: TextStyle(color: Colors.white)),
         actions: [
           TextButton(
-            onPressed: _deleteProfile,
+            onPressed: _confirmDelete,
             child: const Text('삭제', style: TextStyle(color: Colors.red)),
           )
         ],
