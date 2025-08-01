@@ -38,3 +38,6 @@ out/
 
 ### .env ###
 .env
+
+### Firebase 서비스 계정 키 ###
+**/serviceAccountKey.json

@@ -75,7 +75,7 @@ public class SocialAuthService {
         Instant now = Instant.now();
         JwsHeader jwsHeader = JwsHeader.with(MacAlgorithm.HS256).build();
 
-        // Access Token (30분)
+        // Access Token
         JwtClaimsSet accessClaims = JwtClaimsSet.builder()
                 .issuer("siseon")
                 .issuedAt(now)
@@ -87,7 +87,7 @@ public class SocialAuthService {
                 JwtEncoderParameters.from(jwsHeader, accessClaims)
         ).getTokenValue();
 
-        // Refresh Token (7일)
+        // Refresh Token
         JwtClaimsSet refreshClaims = JwtClaimsSet.builder()
                 .issuer("siseon")
                 .issuedAt(now)
