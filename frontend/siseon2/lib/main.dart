@@ -52,15 +52,21 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> initApp() async {
     await Future.delayed(const Duration(seconds: 2));
 
-    // ✅ 푸시 초기화
+    // ✅ FCM 초기화 (알림 리스너 등록만 담당)
     await FCMService.initialize();
 
     final token = await AuthService.getValidAccessToken();
     if (token != null) {
       await ProfileCacheService.clearProfile();
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ProfileSelectScreen()));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const ProfileSelectScreen()),
+      );
     } else {
-      Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+      );
     }
   }
 

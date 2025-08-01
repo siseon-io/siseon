@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:siseon2/services/auth_service.dart';
 
 class UpdatePage extends StatefulWidget {
   const UpdatePage({Key? key}) : super(key: key);
@@ -36,6 +37,31 @@ class _UpdatePageState extends State<UpdatePage>
     super.dispose();
   }
 
+  Future<void> _showAccessToken() async {
+    final token = await AuthService.getValidAccessToken();
+    print("🔑 Access Token: $token"); // 콘솔 로그
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Access Token'),
+        content: SingleChildScrollView(
+          child: Text(
+            token ?? '토큰 없음 (로그인 필요)',
+            style: const TextStyle(fontSize: 14),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('닫기'),
+          )
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -71,7 +97,26 @@ class _UpdatePageState extends State<UpdatePage>
               const SizedBox(height: 20),
               _buildVersionCard('새 버전', newVersion, primaryBlue),
               const Spacer(),
-              // 업데이트 버튼
+              // ✅ Access Token 출력 버튼
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: _showAccessToken,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Access Token 보기',
+                    style: TextStyle(fontSize: 16, color: Colors.white),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              // 기존 업데이트 버튼
               SizedBox(
                 width: double.infinity,
                 height: 50,
