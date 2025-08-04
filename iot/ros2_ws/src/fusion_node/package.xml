@@ -3,7 +3,7 @@
 <package format="3">
   <name>fusion_node</name>
   <version>0.0.0</version>
-  <description>TODO: Package description</description>
+  <description>Fusion node for robot control mode switching</description>
   <maintainer email="b101@todo.todo">b101</maintainer>
   <license>TODO: License declaration</license>
 
@@ -11,6 +11,7 @@
 
   <depend>rclcpp</depend>
   <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

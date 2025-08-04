@@ -9,8 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
-# JSON (header-only)
-find_package(nlohmann_json REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 add_executable(fusion_node src/fusion_node.cpp)
 
@@ -18,16 +17,18 @@ add_executable(fusion_node src/fusion_node.cpp)
 ament_target_dependencies(fusion_node
   rclcpp
   std_msgs
-)
-
-# Header-only 라이브러리 링크
-target_link_libraries(fusion_node
-  nlohmann_json::nlohmann_json
+  geometry_msgs
 )
 
 install(TARGETS fusion_node
   DESTINATION lib/${PROJECT_NAME}
 )
+
+# Launch 파일 설치 (이 부분이 누락되어 있었습니다!)
+install(DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}/
+)
+
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   # the following line skips the linter which checks for copyrights
