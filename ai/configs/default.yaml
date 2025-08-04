@@ -1,3 +1,5 @@
+# configs/default.yaml
+
 # ======================
 # 공통 설정
 # ======================
@@ -56,12 +58,12 @@ model:
 # 추론/인퍼런스 설정
 # ======================
 inference:
-  conf_thresh: 0.25
-  webcam_index: 0
-  cam_width: 640
-  cam_height: 480
-  backend_url: 'http://i13b101.p.ssafy.io:8080.s'
-  weights: 'runs/train/eye-detection-kso3d_v4/weights/best.pt'
+  conf_thresh: 0.25           # gaze 모델 confidence threshold
+  webcam_index: 0             # 사용할 웹캠 인덱스
+  cam_width: 640              # 캡처 프레임 너비
+  cam_height: 480             # 캡처 프레임 높이
+  weights: 'weights/best_gaze.pt'      # gaze 모델 weights 위치
+  pose_weights: 'weights/best_pose.pt' # pose 모델 weights 위치
 
 # ======================
 # 하이퍼파라미터 최적화
