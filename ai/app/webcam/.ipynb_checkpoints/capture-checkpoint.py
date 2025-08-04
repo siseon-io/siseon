@@ -3,7 +3,6 @@
 import cv2
 import logging
 
-
 def init_video_capture(index: int, width: int, height: int) -> cv2.VideoCapture:
     """
     OpenCV VideoCapture 객체를 초기화합니다.

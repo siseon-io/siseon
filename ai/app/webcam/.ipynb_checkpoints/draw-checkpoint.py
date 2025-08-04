@@ -3,26 +3,22 @@
 import cv2
 import numpy as np
 
-
-def draw_bboxes(frame: np.ndarray, results) -> None:
+def draw_bboxes(frame: np.ndarray, results) -> np.ndarray:
     """
-    검출된 박스와 클래스 이름을 원본 프레임에 그립니다.
-
-    Args:
-        frame (np.ndarray): 원본 이미지 프레임 (BGR)
-        results: 박스와 클래스 정보를 가진 객체 (예: YOLO 결과)
+    Gaze 검출 결과의 bounding box를 그립니다.
     """
-    for box in results[0].boxes:
-        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
-        cls_id = int(box.cls[0].cpu().numpy())
-        label = results[0].names[cls_id]
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255), 2)
-        cv2.putText(
-            frame,
-            label,
-            (x1, y1 - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 255, 255),
-            1
-        )
+    for res in results:
+        for box in res.boxes:
+            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+    return frame
+
+def draw_pose(frame: np.ndarray, keypoints: np.ndarray) -> np.ndarray:
+    """
+    Pose 추정 keypoint를 그립니다.
+    """
+    for x, y, c in keypoints:
+        if c > 0.3:  # confidence threshold
+            cv2.circle(frame, (int(x), int(y)), 3, (0, 0, 255), -1)
+    # TODO: skeleton 연결 선 그리기
+    return frame
