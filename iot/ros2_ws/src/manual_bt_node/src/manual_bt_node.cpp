@@ -14,7 +14,7 @@ public:
             asio::ip::udp::endpoint(asio::ip::udp::v4(), 30080))
   {
     // 1) ROS2 퍼블리셔 생성
-    pub_ = this->create_publisher<std_msgs::msg::String>("manual_pose", 10);
+    pub_ = this->create_publisher<std_msgs::msg::String>("/manual_pose", 10);
 
     
     // 3) UDP 수신 시작
