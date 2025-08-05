@@ -6,10 +6,10 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
-import siseon.backend.domain.User;
+import siseon.backend.domain.main.User;
 import siseon.backend.dto.ProfileCreateRequest;
 import siseon.backend.dto.ProfileResponse;
-import siseon.backend.repository.UserRepository;
+import siseon.backend.repository.main.UserRepository;
 import siseon.backend.service.ProfileService;
 
 import java.util.List;

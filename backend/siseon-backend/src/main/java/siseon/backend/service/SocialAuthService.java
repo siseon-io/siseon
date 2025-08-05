@@ -10,8 +10,8 @@ import org.springframework.web.reactive.function.client.WebClient;
 import siseon.backend.dto.GoogleUserInfo;
 import siseon.backend.dto.JwtResponse;
 import siseon.backend.dto.SocialLoginRequest;
-import siseon.backend.domain.User;
-import siseon.backend.repository.UserRepository;
+import siseon.backend.domain.main.User;
+import siseon.backend.repository.main.UserRepository;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;

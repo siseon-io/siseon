@@ -6,10 +6,12 @@ services:
     container_name: siseon-db
     restart: unless-stopped
     environment:
+      TZ: Asia/Seoul
       MYSQL_ROOT_PASSWORD: ss@fy1234
       MYSQL_DATABASE: siseon
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASS}
+    command: --default-time-zone=Asia/Seoul
     volumes:
       - db_data:/var/lib/mysql
     networks:
@@ -23,6 +25,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      TZ: Asia/Seoul
     depends_on:
       - db
     networks:

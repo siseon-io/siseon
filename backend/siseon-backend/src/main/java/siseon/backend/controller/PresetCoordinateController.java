@@ -1,9 +1,14 @@
 package siseon.backend.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import siseon.backend.dto.PresetCoordinate;
+import siseon.backend.dto.PresetPublishRequest;
 import siseon.backend.service.PresetCoordinatePublisherService;
 import siseon.backend.service.PresetService;
 
@@ -15,10 +20,25 @@ public class PresetCoordinateController {
     private final PresetService presetService;
     private final PresetCoordinatePublisherService publisher;
 
-    @PostMapping("/publish/{profileId}")
-    public ResponseEntity<Void> publishCoordinate(@PathVariable Long profileId) throws Exception {
-        PresetCoordinate coord = presetService.getPresetCoordinate(profileId);
+    @Operation(
+            summary = "프리셋 좌표 발행",
+            responses = {
+                    @ApiResponse(
+                            responseCode = "200",
+                            description = "발행된 좌표 정보",
+                            content = @Content(schema = @Schema(implementation = PresetCoordinate.class))
+                    )
+            }
+    )
+    @PostMapping
+    public ResponseEntity<PresetCoordinate> publishCoordinate(
+            @RequestBody PresetPublishRequest req
+    ) throws Exception {
+        PresetCoordinate coord = presetService.getPresetCoordinate(
+                req.getProfileId(),
+                req.getPresetId()
+        );
         publisher.publish(coord);
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(coord);
     }
 }

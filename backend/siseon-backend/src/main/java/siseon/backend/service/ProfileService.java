@@ -3,12 +3,12 @@ package siseon.backend.service;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import siseon.backend.domain.Profile;
-import siseon.backend.domain.User;
+import siseon.backend.domain.main.Profile;
+import siseon.backend.domain.main.User;
 import siseon.backend.dto.ProfileCreateRequest;
 import siseon.backend.dto.ProfileResponse;
-import siseon.backend.repository.ProfileRepository;
-import siseon.backend.repository.UserRepository;
+import siseon.backend.repository.main.ProfileRepository;
+import siseon.backend.repository.main.UserRepository;
 
 import java.util.List;
 import java.util.stream.Collectors;

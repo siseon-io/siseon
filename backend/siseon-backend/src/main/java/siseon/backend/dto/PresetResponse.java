@@ -1,6 +1,7 @@
 package siseon.backend.dto;
 
 import lombok.*;
+import siseon.backend.domain.main.Preset;
 
 import java.time.LocalDateTime;
 import java.util.Map;
@@ -18,7 +19,7 @@ public class PresetResponse {
     private Map<String, Object> position;
     private LocalDateTime createdAt;
 
-    public static PresetResponse fromEntity(siseon.backend.domain.Preset preset) {
+    public static PresetResponse fromEntity(Preset preset) {
         return PresetResponse.builder()
                 .presetId(preset.getPresetId())
                 .deviceId(preset.getDeviceId())

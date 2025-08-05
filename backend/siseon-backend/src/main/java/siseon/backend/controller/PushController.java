@@ -5,11 +5,11 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.*;
-import siseon.backend.domain.User;
+import siseon.backend.domain.main.User;
 import siseon.backend.dto.ProfileResponse;
 import siseon.backend.service.ProfileService;
 import siseon.backend.service.PushNotificationService;
-import siseon.backend.repository.UserRepository;
+import siseon.backend.repository.main.UserRepository;
 
 @RestController
 @RequestMapping("/api/push")
