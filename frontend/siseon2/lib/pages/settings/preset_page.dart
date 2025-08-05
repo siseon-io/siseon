@@ -54,8 +54,6 @@ class _PresetPageState extends State<PresetPage> {
 
   void _renamePreset(int index) async {
     final preset = _presets[index];
-    print('🛠 선택된 프리셋: $preset');
-
     final controller = TextEditingController(text: preset['name']);
 
     final newName = await showDialog<String>(
@@ -65,11 +63,9 @@ class _PresetPageState extends State<PresetPage> {
         title: const Text('프리셋 이름 변경', style: TextStyle(color: Colors.white)),
         content: TextField(
           controller: controller,
-          maxLength: 7, // ✅ 최대 7글자 제한
           style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
-            counterStyle: const TextStyle(color: Colors.white54), // 글자 수 표시 스타일
-            labelText: '새 이름 (최대 7글자)',
+            labelText: '새 이름',
             labelStyle: const TextStyle(color: Colors.white60),
             filled: true,
             fillColor: const Color(0xFF1E2533),
@@ -82,33 +78,17 @@ class _PresetPageState extends State<PresetPage> {
             child: const Text('취소', style: TextStyle(color: Colors.white70)),
           ),
           TextButton(
-            onPressed: () {
-              if (controller.text.trim().isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('❌ 이름을 입력해주세요')),
-                );
-                return;
-              }
-              if (controller.text.trim().length > 7) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('❌ 이름은 최대 7글자까지 가능합니다')),
-                );
-                return;
-              }
-              Navigator.pop(ctx, controller.text.trim());
-            },
+            onPressed: () => Navigator.pop(ctx, controller.text),
             child: const Text('변경', style: TextStyle(color: primaryBlue)),
           ),
         ],
       ),
     );
 
-    if (newName != null && newName.isNotEmpty) {
-      print('🛠 이름 변경 요청: id=${preset['id']} → $newName');
-
+    if (newName != null && newName.trim().isNotEmpty) {
       final updated = await PresetService.updatePreset(
-        preset['id'],
-        newName,
+        preset['presetId'],
+        newName.trim(),
         _profileId!,
         preset['deviceId'],
         preset['position'] ?? {'x': 0, 'y': 0, 'z': 0},
@@ -122,7 +102,6 @@ class _PresetPageState extends State<PresetPage> {
       }
     }
   }
-
 
   void _deletePreset(int index) async {
     final preset = _presets[index];

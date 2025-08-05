@@ -1,32 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // ✅ dotenv 추가
-import 'package:firebase_core/firebase_core.dart';
-
-import 'package:siseon2/services/mqtt_service.dart';
 import 'package:siseon2/services/auth_service.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
-import 'package:siseon2/services/fcm_service.dart';
-
 import '/login_screen.dart';
 import '/profile_select_screen.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:siseon2/services/fcm_service.dart';
 
 /// 전역 네비게이터 키 (알림 팝업에 사용)
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-Future<void> main() async {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // ✅ 환경변수 로드 (.env)
-  await dotenv.load(fileName: ".env");
-
-  // ✅ Firebase 초기화 (FCM 사용을 위해 반드시 선행)
   await Firebase.initializeApp();
 
-  // ✅ MQTT 연결
-  await mqttService.connect();
-
-  // ✅ 세로 화면 고정
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
   runApp(const MyApp());
@@ -51,7 +38,6 @@ class MyApp extends StatelessWidget {
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
-
   @override
   State<SplashScreen> createState() => _SplashScreenState();
 }
@@ -66,10 +52,9 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> initApp() async {
     await Future.delayed(const Duration(seconds: 2));
 
-    // ✅ FCM 초기화 (Firebase 초기화 후 실행)
+    // ✅ FCM 초기화 (알림 리스너 등록만 담당)
     await FCMService.initialize();
 
-    // ✅ 로그인 여부 확인 후 화면 분기
     final token = await AuthService.getValidAccessToken();
     if (token != null) {
       await ProfileCacheService.clearProfile();
