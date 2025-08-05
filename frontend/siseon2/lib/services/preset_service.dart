@@ -19,25 +19,11 @@ class PresetService {
     print('📥 응답 본문: ${utf8.decode(response.bodyBytes)}');
 
     if (response.statusCode == 200) {
-      final List<dynamic> rawList = jsonDecode(utf8.decode(response.bodyBytes));
-
-      // 🔑 서버 응답을 UI에서 일관되게 사용하도록 변환
-      final presets = rawList.map((item) {
-        final map = Map<String, dynamic>.from(item);
-        return {
-          'id': map['id'] ?? map['presetId'] ?? map['preset_id'], // ✅ ID 키 매핑
-          'name': map['name'] ?? '이름 없음',
-          'deviceId': map['deviceId'] ?? map['device_id'],
-          'position': map['position'] ?? {},
-        };
-      }).toList();
-
-      print("✅ 변환된 프리셋 목록: $presets");
-      return List<Map<String, dynamic>>.from(presets);
+      return List<Map<String, dynamic>>.from(
+          jsonDecode(utf8.decode(response.bodyBytes)));
     }
     return [];
   }
-
 
   /// ✅ 프리셋 생성 (position 포함)
   static Future<Map<String, dynamic>?> createPreset(
