@@ -5,9 +5,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 import org.springframework.http.HttpStatus;
-import siseon.backend.domain.User;
+import siseon.backend.domain.main.User;
 import siseon.backend.dto.UserProfile;
-import siseon.backend.repository.UserRepository;
+import siseon.backend.repository.main.UserRepository;
 
 @Service
 @RequiredArgsConstructor

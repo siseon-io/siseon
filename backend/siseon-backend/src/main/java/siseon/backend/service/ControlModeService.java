@@ -11,6 +11,10 @@ public class ControlModeService {
 
     private final ObjectMapper objectMapper;
 
+    /**
+     * /control_mode 메시지 처리 (수동 모드 전환 등)
+     * 여기서는 단순히 payload 를 파싱해 로직을 실행하거나 로깅만 합니다.
+     */
     public void handleControlMode(byte[] payload) throws Exception {
         ControlMode mode = objectMapper.readValue(payload, ControlMode.class);
 

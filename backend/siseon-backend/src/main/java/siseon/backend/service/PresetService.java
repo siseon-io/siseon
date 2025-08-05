@@ -3,13 +3,13 @@ package siseon.backend.service;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import siseon.backend.domain.Preset;
-import siseon.backend.domain.Profile;
+import siseon.backend.domain.main.Preset;
+import siseon.backend.domain.main.Profile;
 import siseon.backend.dto.PresetCoordinate;
 import siseon.backend.dto.PresetRequest;
 import siseon.backend.dto.PresetResponse;
-import siseon.backend.repository.PresetRepository;
-import siseon.backend.repository.ProfileRepository;
+import siseon.backend.repository.main.PresetRepository;
+import siseon.backend.repository.main.ProfileRepository;
 
 import java.util.List;
 import java.util.Map;
@@ -87,14 +87,18 @@ public class PresetService {
     }
 
     @Transactional(readOnly = true)
-    public PresetCoordinate getPresetCoordinate(Long profileId) {
-        Preset preset = presetRepository.findByProfile_Id(profileId).stream()
-                .findFirst()
+    public PresetCoordinate getPresetCoordinate(Long profileId, Long presetId) {
+        Preset preset = presetRepository.findById(presetId)
                 .orElseThrow(() -> new IllegalArgumentException(
-                        "해당 프로필의 프리셋이 없습니다. id=" + profileId));
+                        "해당 프리셋이 존재하지 않습니다. id=" + presetId));
+
+        if (!preset.getProfile().getId().equals(profileId)) {
+            throw new IllegalArgumentException(
+                    "프리셋(presetId=" + presetId + ")이 profile(profileId=" + profileId + ")에 속하지 않습니다.");
+        }
 
         @SuppressWarnings("unchecked")
-        var posMap = (Map<String, Object>) preset.getPosition();
+        Map<String,Object> posMap = (Map<String,Object>) preset.getPosition();
         double x = ((Number) posMap.get("x")).doubleValue();
         double y = ((Number) posMap.get("y")).doubleValue();
         double z = ((Number) posMap.get("z")).doubleValue();

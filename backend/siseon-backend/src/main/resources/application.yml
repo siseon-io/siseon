@@ -2,6 +2,15 @@ server:
   port: 8080
 
 spring:
+  batch:
+    jdbc:
+      initialize-schema: always
+    datasource:
+      url: jdbc:mysql://${BATCH_DB_HOST:localhost}:3306/${BATCH_DB_NAME:batch}?useSSL=false&serverTimezone=Asia/Seoul&allowPublicKeyRetrieval=true
+      username: ${BATCH_DB_USER}
+      password: ${BATCH_DB_PASS}
+      driver-class-name: com.mysql.cj.jdbc.Driver
+
   datasource:
     url: jdbc:mysql://${DB_HOST:localhost}:3306/${DB_NAME:siseon}?useSSL=false&serverTimezone=Asia/Seoul&allowPublicKeyRetrieval=true
     username: ${DB_USER}
