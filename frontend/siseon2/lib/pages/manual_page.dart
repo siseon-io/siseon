@@ -1,14 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_joystick/flutter_joystick.dart';
-import '../services/mqtt_service.dart'; // ✅ MQTT 서비스 import
-import '../models/control_mode.dart'; // ✅ ControlMode enum import
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import '../services/mqtt_service.dart';
+import '../models/control_mode.dart';
 
 class ManualPage extends StatefulWidget {
-  const ManualPage({super.key});
+  final BluetoothCharacteristic writableChar; // ✅ BLE 특성 전달
+
+  const ManualPage({super.key, required this.writableChar});
 
   @override
   State<ManualPage> createState() => _ManualPageState();
@@ -17,13 +21,16 @@ class ManualPage extends StatefulWidget {
 class _ManualPageState extends State<ManualPage> {
   Offset _xzOffset = Offset.zero; // X/Z 제어
   double _yValue = 0.0; // Y 제어
+  List<int> _payload = [127, 127, 127]; // ✅ BLE 전송용 페이로드
+  String _debugMessage = '🔌 연결 상태 확인 중...'; // ✅ BLE 상태 디버그 메시지
   Timer? _sendTimer;
 
   @override
   void initState() {
     super.initState();
+    _checkConnection();
 
-    // 상단 상태바 투명화 + 아이콘 색상 밝게
+    // 상태바 투명화
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
@@ -37,15 +44,56 @@ class _ManualPageState extends State<ManualPage> {
       ]);
     });
 
-    // BLE 데이터 전송 시뮬레이션
-    _sendTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
-      final controlData = {
-        "x": _xzOffset.dx,
-        "z": _xzOffset.dy,
-        "y": _yValue,
-      };
-      print("BLE 전송 데이터: ${jsonEncode(controlData)}");
+    // ✅ 200ms마다 BLE 데이터 전송 (페이로드 기반)
+    _sendTimer = Timer.periodic(const Duration(milliseconds: 200), (_) async {
+      await _sendPayload();
     });
+  }
+
+  /// ✅ BLE 연결 상태 체크
+  Future<void> _checkConnection() async {
+    final isConnected = await widget.writableChar.device.isConnected;
+    setState(() {
+      _debugMessage = isConnected
+          ? '✅ 연결됨, 조작 대기 중...'
+          : '❌ BLE 기기 연결이 끊어졌습니다. 다시 연결해주세요.';
+    });
+  }
+
+  /// ✅ BLE 데이터 전송
+  Future<void> _sendPayload() async {
+    try {
+      final isConnected = await widget.writableChar.device.isConnected;
+      if (!isConnected) {
+        setState(() {
+          _debugMessage = '❌ 기기 연결이 끊어졌습니다. 다시 연결해주세요.';
+        });
+        return;
+      }
+      await widget.writableChar.write(_payload, withoutResponse: false);
+      setState(() {
+        _debugMessage = '📤 전송됨: ${_payload.join(", ")}';
+      });
+    } catch (e) {
+      setState(() {
+        _debugMessage = '❌ 전송 실패: $e';
+      });
+    }
+  }
+
+  /// ✅ XZ 조이스틱 제어 (BLE 데이터 변환)
+  void _onJoystickXZ(double x, double y) {
+    int bx = ((x + 1) * 127.5).toInt().clamp(0, 255);
+    int bz = ((y + 1) * 127.5).toInt().clamp(0, 255);
+    _xzOffset = Offset(x, y);
+    _payload = [bx, _payload[1], bz];
+  }
+
+  /// ✅ Y 조이스틱 제어 (BLE 데이터 변환)
+  void _onJoystickY(double y) {
+    int by = ((y + 1) * 127.5).toInt().clamp(0, 255);
+    _yValue = y;
+    _payload = [_payload[0], by, _payload[2]];
   }
 
   @override
@@ -54,7 +102,7 @@ class _ManualPageState extends State<ManualPage> {
 
     // ✅ 세로모드 복귀 및 Auto 전환 MQTT 발행
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-    _publishAutoMode(); // dispose 시에도 Auto 전환
+    _publishAutoMode();
 
     // 상태바 초기화
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
@@ -65,7 +113,7 @@ class _ManualPageState extends State<ManualPage> {
     super.dispose();
   }
 
-  /// ✅ Auto 모드로 전환 + MQTT 발행
+  /// ✅ Manual 종료 시 Auto 모드로 MQTT 발행
   Future<void> _publishAutoMode() async {
     final payload = {
       "profile_id": "1", // 실제 프로필 ID로 교체
@@ -76,13 +124,13 @@ class _ManualPageState extends State<ManualPage> {
     print("🔄 Manual → Auto 전환 (MQTT 발행): $payload");
   }
 
-  /// Deadzone(중립 영역) 적용 함수
+  /// Deadzone(중립 영역) 적용
   double _applyDeadzone(double value, [double threshold = 0.1]) {
     return value.abs() < threshold ? 0.0 : value;
   }
 
   /// 🕹️ 공통 조이스틱 카드 UI (Glass 스타일)
-  Widget _buildJoystickCard({required Widget joystick}) {
+  Widget _buildJoystickCard(Widget joystick) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(28),
       child: BackdropFilter(
@@ -111,9 +159,9 @@ class _ManualPageState extends State<ManualPage> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope( // ✅ 시스템 뒤로가기 인터셉트
+    return WillPopScope(
       onWillPop: () async {
-        await _publishAutoMode(); // 뒤로가기 시 Auto 모드 전환
+        await _publishAutoMode();
         return true;
       },
       child: Scaffold(
@@ -121,50 +169,65 @@ class _ManualPageState extends State<ManualPage> {
         body: SafeArea(
           child: Stack(
             children: [
+              // ✅ BLE 상태 디버그 메시지
+              Positioned(
+                top: 16,
+                left: 16,
+                right: 16,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.6),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _debugMessage,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                ),
+              ),
+
               // 🕹️ X/Z 조이스틱
               Positioned(
                 bottom: 40,
                 left: 40,
                 child: _buildJoystickCard(
-                  joystick: Joystick(
+                  Joystick(
                     mode: JoystickMode.all,
                     listener: (details) {
-                      setState(() {
-                        _xzOffset = Offset(
-                          _applyDeadzone(details.x),
-                          _applyDeadzone(details.y * -1),
-                        );
-                      });
+                      double x = _applyDeadzone(details.x);
+                      double z = _applyDeadzone(details.y * -1);
+                      _onJoystickXZ(x, z);
                     },
-                    onStickDragEnd: () => setState(() => _xzOffset = Offset.zero),
+                    onStickDragEnd: () => _onJoystickXZ(0, 0),
                   ),
                 ),
               ),
+
               // 🕹️ Y 조이스틱
               Positioned(
                 bottom: 40,
                 right: 40,
                 child: _buildJoystickCard(
-                  joystick: Joystick(
+                  Joystick(
                     mode: JoystickMode.vertical,
                     listener: (details) {
-                      setState(() {
-                        _yValue = _applyDeadzone(details.y * -1);
-                      });
+                      double y = _applyDeadzone(details.y * -1);
+                      _onJoystickY(y);
                     },
-                    onStickDragEnd: () => setState(() => _yValue = 0.0),
+                    onStickDragEnd: () => _onJoystickY(0),
                   ),
                 ),
               ),
 
-              // 🔙 뒤로가기 버튼 (상단 좌측)
+              // 🔙 뒤로가기 버튼
               Positioned(
                 top: 10,
                 left: 10,
                 child: IconButton(
                   icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
                   onPressed: () async {
-                    await _publishAutoMode(); // 버튼 클릭 시도 Auto 전환
+                    await _publishAutoMode();
                     if (context.mounted) Navigator.pop(context);
                   },
                 ),

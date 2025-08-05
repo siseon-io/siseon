@@ -22,17 +22,37 @@ dependencies:
   app_settings: ^5.1.1
   mqtt_client: ^10.10.0
   flutter_dotenv: ^5.0.2
+  json_annotation: ^4.8.1
+
   # 로케일 지원
   flutter_localizations:
     sdk: flutter
   # 날짜 포맷팅
   intl: ^0.20.2   # flutter_localizations와 호환되도록 상향
 
+  # BEL 스캔/연결
+  flutter_blue_plus: ^1.35.5
+  permission_handler: ^11.0.1
+
+  # BLE 광고 송신 (단방향)
+  flutter_ble_peripheral: ^1.2.6
+  flutter_native_splash: ^2.4.6
+
+flutter_native_splash:
+  color: "#0D1117"          # 스플래시 배경색 (앱 다크톤에 맞춤)
+  image: assets/images/eye_open.png  # 스플래시 로고 이미지 경로
+  android: true
+  ios: true
+  android_12:
+    color: "#0D1117"
+    image: assets/images/eye_open.png
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
-  flutter_blue_plus: ^1.30.4
+  build_runner: ^2.4.0
+  json_serializable: ^6.6.1
   permission_handler: ^11.0.1
 
 flutter:

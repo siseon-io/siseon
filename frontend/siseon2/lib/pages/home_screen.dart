@@ -8,14 +8,20 @@ import 'package:siseon2/services/profile_cache_service.dart';
 import 'package:siseon2/services/preset_service.dart';
 import 'package:siseon2/pages/settings/preset_page.dart';
 import 'package:siseon2/pages/ble_scan_screen.dart';
+import 'package:siseon2/pages/manual_page.dart';
 import 'package:siseon2/services/auth_service.dart';
 import 'package:siseon2/services/mqtt_service.dart';
 import 'package:siseon2/models/control_mode.dart';
 
 class HomeScreen extends StatefulWidget {
   final VoidCallback onAiModeSwitch; // RootScreen에서 콜백 전달받음
+  final void Function(BluetoothCharacteristic writableChar)? onConnect; // ✅ RootScreen으로 BLE 전달 콜백
 
-  const HomeScreen({super.key, required this.onAiModeSwitch});
+  const HomeScreen({
+    super.key,
+    required this.onAiModeSwitch,
+    this.onConnect,
+  });
 
   @override
   HomeScreenState createState() => HomeScreenState();
@@ -26,6 +32,9 @@ class HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _presets = [];
   bool _isBluetoothOn = false;
   ControlMode _currentMode = ControlMode.auto; // 초기 모드: auto
+
+  BluetoothDevice? _connectedDevice;
+  BluetoothCharacteristic? _writableChar;
 
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color backgroundBlack = Color(0xFF0D1117);
@@ -39,6 +48,23 @@ class HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadProfileAndPresets();
     _checkBluetoothState();
+    _initPermissions();
+  }
+
+  /// ✅ BLE 권한 요청
+  Future<void> _initPermissions() async {
+    final bleScan = await Permission.bluetoothScan.request();
+    final bleConnect = await Permission.bluetoothConnect.request();
+    final location = await Permission.location.request();
+
+    if (!bleScan.isGranted || !bleConnect.isGranted || !location.isGranted) {
+      print('❌ BLE 권한이 부족합니다. 기능이 제한될 수 있습니다.');
+      if (await Permission.bluetoothConnect.isPermanentlyDenied) {
+        openAppSettings();
+      }
+    } else {
+      print('✅ BLE 권한 모두 허용됨');
+    }
   }
 
   /// ✅ 블루투스 상태 체크
@@ -47,31 +73,52 @@ class HomeScreenState extends State<HomeScreen> {
     setState(() => _isBluetoothOn = isOn);
   }
 
-  /// ✅ BLE 권한 요청 및 스캔 화면 이동
+  /// ✅ BLE 스캔 및 연결
   Future<void> _handleDisconnectAndScan() async {
-    final bluetooth = await Permission.bluetoothConnect.request();
-    final scan = await Permission.bluetoothScan.request();
-    final location = await Permission.location.request();
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (_) => const BleScanScreen()),
+    );
+    if (result == null) return;
 
-    final allGranted = bluetooth.isGranted && scan.isGranted && location.isGranted;
-    if (!allGranted) {
+    setState(() {
+      _connectedDevice = result['device'] as BluetoothDevice;
+      _writableChar = result['writableChar'] as BluetoothCharacteristic;
+    });
+
+    // ✅ RootScreen에 BLE characteristic 전달
+    if (widget.onConnect != null && _writableChar != null) {
+      widget.onConnect!(_writableChar!);
+      print("✅ RootScreen으로 writableChar 전달 완료: $_writableChar");
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('✅ BLE 연결 성공')),
+    );
+  }
+
+  /// ✅ BLE 연결 해제
+  Future<void> _handleDisconnect() async {
+    await _connectedDevice?.disconnect();
+    setState(() {
+      _connectedDevice = null;
+      _writableChar = null;
+    });
+  }
+
+  /// ✅ 수동 조작 화면 이동
+  void _goManual() {
+    if (_writableChar == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('❌ BLE 권한이 필요합니다')),
+        const SnackBar(content: Text('⚠️ BLE 기기를 먼저 연결해주세요.')),
       );
       return;
     }
-
-    final isOn = await FlutterBluePlus.isOn;
-    if (!isOn) {
-      await FlutterBluePlus.turnOn();
-      await AppSettings.openAppSettings();
-      return;
-    }
-
-    if (!mounted) return;
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => const BleScanScreen()),
+      MaterialPageRoute(
+        builder: (_) => ManualPage(writableChar: _writableChar!),
+      ),
     );
   }
 
@@ -114,7 +161,7 @@ class HomeScreenState extends State<HomeScreen> {
     });
 
     _publishMode(prevMode, ControlMode.auto);
-    widget.onAiModeSwitch(); // RootScreen 콜백 실행
+    widget.onAiModeSwitch();
   }
 
   /// ✅ 프리셋 선택 시 API & MQTT 발행
@@ -124,7 +171,6 @@ class HomeScreenState extends State<HomeScreen> {
     final prevMode = _currentMode;
 
     try {
-      // API 요청
       final token = await AuthService.getValidAccessToken();
       final response = await http.post(
         Uri.parse('http://i13b101.p.ssafy.io:8080/api/preset-coordinate'),
@@ -188,7 +234,8 @@ class HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // 현재 모드 텍스트 설정
+    final isConnected = _connectedDevice != null;
+
     String modeText;
     switch (_currentMode) {
       case ControlMode.auto:
@@ -246,23 +293,39 @@ class HomeScreenState extends State<HomeScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      ElevatedButton(
-                        onPressed: _isBluetoothOn ? null : AppSettings.openAppSettings,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _isBluetoothOn ? Colors.grey : primaryBlue,
+                      ElevatedButton.icon(
+                        onPressed: isConnected ? null : _handleDisconnectAndScan,
+                        icon: Icon(
+                          isConnected ? Icons.bluetooth_connected : Icons.bluetooth_searching,
+                          color: Colors.white,
                         ),
-                        child: Text(_isBluetoothOn ? 'Connected' : 'Connect Bluetooth'),
-                      ),
-                      const SizedBox(width: 20),
-                      ElevatedButton(
-                        onPressed: _handleDisconnectAndScan,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.redAccent,
+                        label: Text(
+                          isConnected ? 'Connected' : 'Scan & Connect',
+                          style: const TextStyle(color: Colors.white),
                         ),
-                        child: const Text('Disconnect'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isConnected ? Colors.green : primaryBlue,
+                        ),
                       ),
+                      const SizedBox(width: 16),
+                      if (isConnected)
+                        ElevatedButton.icon(
+                          onPressed: _handleDisconnect,
+                          icon: const Icon(Icons.close, color: Colors.white),
+                          label: const Text('Disconnect', style: TextStyle(color: Colors.white)),
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                        ),
                     ],
                   ),
+                  if (isConnected) ...[
+                    const SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      onPressed: _goManual,
+                      icon: const Icon(Icons.gamepad, color: Colors.white),
+                      label: const Text('조작 화면 열기', style: TextStyle(color: Colors.white)),
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
+                    ),
+                  ],
                 ],
               ),
             ),
