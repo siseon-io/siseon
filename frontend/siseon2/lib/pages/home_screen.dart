@@ -1,24 +1,31 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:app_settings/app_settings.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:http/http.dart' as http;
 import 'package:siseon2/services/profile_cache_service.dart';
 import 'package:siseon2/services/preset_service.dart';
 import 'package:siseon2/pages/settings/preset_page.dart';
-import 'package:siseon2/pages/settings/edit_profile.dart';
-import 'package:siseon2/pages/ble_scan_screen.dart'; // ✅ BLE 스캔 화면
+import 'package:siseon2/pages/ble_scan_screen.dart';
+import 'package:siseon2/services/auth_service.dart';
+import 'package:siseon2/services/mqtt_service.dart';
+import 'package:siseon2/models/control_mode.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final VoidCallback onAiModeSwitch; // RootScreen에서 콜백 전달받음
+
+  const HomeScreen({super.key, required this.onAiModeSwitch});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  HomeScreenState createState() => HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _profile;
   List<Map<String, dynamic>> _presets = [];
-  bool _isBluetoothOn = false; // ✅ 블루투스 상태
+  bool _isBluetoothOn = false;
+  ControlMode _currentMode = ControlMode.auto; // 초기 모드: auto
 
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color backgroundBlack = Color(0xFF0D1117);
@@ -31,7 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _loadProfileAndPresets();
-    _checkBluetoothState(); // ✅ 블루투스 상태 확인
+    _checkBluetoothState();
   }
 
   /// ✅ 블루투스 상태 체크
@@ -68,6 +75,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// ✅ 프로필 및 프리셋 불러오기
   Future<void> _loadProfileAndPresets() async {
     final profile = await ProfileCacheService.loadProfile();
     if (profile == null) return;
@@ -81,6 +89,72 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  /// ✅ MQTT 발행
+  void _publishMode(ControlMode previous, ControlMode current) {
+    if (_profile == null) return;
+
+    final profileId = _profile!['id'].toString();
+    final payload = {
+      "profile_id": profileId,
+      "previous_mode": previous.name,
+      "current_mode": current.name,
+    };
+
+    mqttService.publish('/control_mode/1', payload);
+    print("📤 MQTT 발행: $payload");
+  }
+
+  /// ✅ RootScreen에서 호출하는 AI 모드 전환
+  void switchToAiMode() {
+    if (_profile == null) return;
+
+    final prevMode = _currentMode;
+    setState(() {
+      _currentMode = ControlMode.auto;
+    });
+
+    _publishMode(prevMode, ControlMode.auto);
+    widget.onAiModeSwitch(); // RootScreen 콜백 실행
+  }
+
+  /// ✅ 프리셋 선택 시 API & MQTT 발행
+  Future<void> _handlePresetSelect(int presetId) async {
+    if (_profile == null) return;
+    final profileId = _profile!['id'];
+    final prevMode = _currentMode;
+
+    try {
+      // API 요청
+      final token = await AuthService.getValidAccessToken();
+      final response = await http.post(
+        Uri.parse('http://i13b101.p.ssafy.io:8080/api/preset-coordinate'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          "profile_id": profileId,
+          "preset_id": presetId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        print("✅ 프리셋 좌표 API 호출 성공");
+      } else {
+        print("❌ 프리셋 좌표 API 실패: ${response.statusCode}, ${response.body}");
+      }
+
+      setState(() {
+        _currentMode = ControlMode.preset;
+      });
+
+      _publishMode(prevMode, ControlMode.preset);
+    } catch (e) {
+      print("❌ 프리셋 실행 중 오류: $e");
+    }
+  }
+
+  /// ✅ 프리셋 추가
   Future<void> _addPreset() async {
     if (_presets.length >= 3) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -114,10 +188,27 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    final nickname = _profile!['name'] ?? '사용자';
-    final avatarImage = _profile!['imageUrl'] != null && _profile!['imageUrl'].isNotEmpty
-        ? AssetImage(_profile!['imageUrl'])
-        : AssetImage('assets/images/profile_${_profile!['avatar'] ?? 'frog'}.png');
+    // 현재 모드 텍스트 설정
+    String modeText;
+    switch (_currentMode) {
+      case ControlMode.auto:
+        modeText = "AI 모드";
+        break;
+      case ControlMode.preset:
+        modeText = "프리셋 모드";
+        break;
+      case ControlMode.manual:
+        modeText = "수동 모드";
+        break;
+      case ControlMode.fix:
+        modeText = "고정 모드";
+        break;
+      case ControlMode.off:
+        modeText = "현재 전원이 꺼져있습니다.";
+        break;
+      default:
+        modeText = "알 수 없는 모드";
+    }
 
     return Scaffold(
       backgroundColor: backgroundBlack,
@@ -125,28 +216,7 @@ class _HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            /// ✅ 🔥 리뉴얼중입니다 배너
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 18),
-              margin: const EdgeInsets.only(bottom: 20),
-              decoration: BoxDecoration(
-                color: Colors.redAccent.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.redAccent, width: 2),
-              ),
-              child: const Text(
-                '🔥 리뉴얼중입니다!',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.redAccent,
-                ),
-              ),
-            ),
-
-            /// ✅ 상단 프로필 영역
+            /// 상단 프로필 카드
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               decoration: BoxDecoration(
@@ -162,9 +232,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               child: Column(
                 children: [
-                  const Text(
-                    '현재 AI MODE 입니다.',
-                    style: TextStyle(
+                  Text(
+                    _currentMode == ControlMode.off
+                        ? modeText
+                        : '현재 $modeText 입니다.',
+                    style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
                       color: Colors.white,
@@ -196,7 +268,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 30),
 
-            /// ✅ 프리셋 영역
+            /// 프리셋 영역
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -227,6 +299,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// ✅ 프리셋 버튼 UI
   Widget _buildPresetArea() {
     if (_presets.isEmpty) return _addPresetButton();
 
@@ -234,10 +307,11 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         ..._presets.map((entry) {
           final presetName = entry['name'] ?? '이름 없음';
+          final presetId = entry['id'] ?? 0;
           return Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: _presetButton(presetName),
+              child: _presetButton(presetName, presetId),
             ),
           );
         }).toList(),
@@ -270,9 +344,9 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _presetButton(String name) {
+  Widget _presetButton(String name, int presetId) {
     return InkWell(
-      onTap: () => print('📌 선택된 프리셋: $name'),
+      onTap: () => _handlePresetSelect(presetId),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         height: 60,

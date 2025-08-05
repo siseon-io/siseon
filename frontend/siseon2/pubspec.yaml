@@ -20,7 +20,8 @@ dependencies:
   firebase_core: ^3.4.0
   firebase_messaging: ^15.0.0
   app_settings: ^5.1.1
-
+  mqtt_client: ^10.10.0
+  flutter_dotenv: ^5.0.2
   # 로케일 지원
   flutter_localizations:
     sdk: flutter
@@ -39,6 +40,8 @@ flutter:
 
   assets:
     - assets/images/
+    - assets/certs/cert.pem
+    - .env
 
   fonts:
     - family: Pretendard
