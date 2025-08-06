@@ -24,7 +24,7 @@ public:
             "/preset_pose", 10,
             std::bind(&FusionNode::preset_pose_callback, this, std::placeholders::_1));
 
-        cmd_motor_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>("/cmd_motor", 10);
+        cmd_pose_pub_ = this->create_publisher<std_msgs::msg::Float64MultiArray>("/cmd_pose", 10);
 
         current_mode_ = "preset";
     }
@@ -35,7 +35,7 @@ private:
     rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr manual_pose_sub_;
     rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr preset_pose_sub_;
 
-    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr cmd_motor_pub_;
+    rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr cmd_pose_pub_;
 
     std::string current_mode_;
     geometry_msgs::msg::Point last_eye_pose_;
@@ -84,9 +84,9 @@ private:
         motor_cmd.data[3] = pose.x + pose.y; // m4
         motor_cmd.data[4] = pose.y + pose.z; // m5
 
-        cmd_motor_pub_->publish(motor_cmd);
+        cmd_pose_pub_->publish(motor_cmd);
 
-        RCLCPP_INFO(this->get_logger(), "\u2192 cmd_motor 퍼블리시: [%.2f, %.2f, %.2f, %.2f, %.2f]",
+        RCLCPP_INFO(this->get_logger(), "\u2192 cmd_pose 퍼블리시: [%.2f, %.2f, %.2f, %.2f, %.2f]",
                     motor_cmd.data[0], motor_cmd.data[1], motor_cmd.data[2],
                     motor_cmd.data[3], motor_cmd.data[4]);
     }
