@@ -1,7 +1,7 @@
 # CMakeLists.txt
 
 cmake_minimum_required(VERSION 3.8)
-project(pairing_node)
+project(pairing_bridge_node)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic -std=c++17)
@@ -51,25 +51,25 @@ foreach(i RANGE ${LAST_IDX})
     DEPENDS ${IFACE_XML}
   )
 endforeach()
-add_custom_target(pairing_node_dbus_codegen DEPENDS ${GENERATED_HEADERS})
+add_custom_target(pairing_bridge_node_dbus_codegen DEPENDS ${GENERATED_HEADERS})
 include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
-add_executable(pairing_node src/pairing_node.cpp)
-add_dependencies(pairing_node pairing_node_dbus_codegen)
+add_executable(pairing_bridge_node src/pairing_bridge_node.cpp)
+add_dependencies(pairing_bridge_node pairing_bridge_node_dbus_codegen)
 
-ament_target_dependencies(pairing_node
+ament_target_dependencies(pairing_bridge_node
   rclcpp
   std_msgs
   geometry_msgs
 )
 
-target_link_libraries(pairing_node
+target_link_libraries(pairing_bridge_node
   ${PAHO_MQTT_CPP_LIB}
   ${PAHO_MQTT_C_LIB}
   ${SDBUS_CPP_LIB}
 )
 
-install(TARGETS pairing_node DESTINATION lib/${PROJECT_NAME})
+install(TARGETS pairing_bridge_node DESTINATION lib/${PROJECT_NAME})
 install(PROGRAMS hooks/local_setup.sh DESTINATION . RENAME local_setup.bash)
 
 ament_package()

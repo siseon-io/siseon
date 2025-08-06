@@ -1,4 +1,4 @@
-// src/pairing_node.cpp
+// src/pairing_bridge_node.cpp
 
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
@@ -18,14 +18,14 @@
 static constexpr int QOS = 1;
 using namespace std::chrono_literals;
 
-// ── PairingNode 클래스 ─────────────────────────────────────────────────
-class PairingNode
+// ── PairingBridgeNode 클래스 ─────────────────────────────────────────────────
+class PairingBridgeNode
     : public rclcpp::Node
     , public virtual mqtt::callback
 {
 public:
-    PairingNode()
-    : Node("pairing_node")
+    PairingBridgeNode()
+    : Node("pairing_bridge_node")
     {
         // ROS2 퍼블리셔
         pub_ = create_publisher<std_msgs::msg::String>("/mac_addr", 10);
@@ -44,7 +44,7 @@ public:
         timer_ = create_wall_timer(1s, [this]() { pollConnections(); });
     }
 
-    ~PairingNode() override
+    ~PairingBridgeNode() override
     {
         try { client_->disconnect()->wait(); } catch(...) {}
 
@@ -150,7 +150,7 @@ private:
             mqttHost_ + ":" + std::to_string(mqttPort_);
         RCLCPP_INFO(get_logger(), "🔗 MQTT broker: %s", address.c_str());
 
-        client_ = std::make_unique<mqtt::async_client>(address, "pairing_node");
+        client_ = std::make_unique<mqtt::async_client>(address, "pairing_bridge_node");
         client_->set_callback(*this);
 
         auto sslb = mqtt::ssl_options_builder();
@@ -192,7 +192,7 @@ private:
         advObj_->registerMethod("Release")
                 .onInterface("org.bluez.LEAdvertisement1")
                 .implementedAs([](){
-                    RCLCPP_INFO(rclcpp::get_logger("pairing_node"), "Advertisement Release()");
+                    RCLCPP_INFO(rclcpp::get_logger("pairing_bridge_node"), "Advertisement Release()");
                 });
         advObj_->registerProperty("Type")
                 .onInterface("org.bluez.LEAdvertisement1")
@@ -307,7 +307,7 @@ private:
 
 int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<PairingNode>();
+    auto node = std::make_shared<PairingBridgeNode>();
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;
