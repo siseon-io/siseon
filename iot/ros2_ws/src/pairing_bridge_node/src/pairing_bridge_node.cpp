@@ -14,9 +14,11 @@
 #include <algorithm>
 #include <sdbus-c++/sdbus-c++.h>
 #include <mqtt/async_client.h>
+#include <nlohmann/json.hpp>
 
 static constexpr int QOS = 1;
 using namespace std::chrono_literals;
+using json = nlohmann::json;
 
 // ── PairingBridgeNode 클래스 ─────────────────────────────────────────────────
 class PairingBridgeNode
@@ -65,6 +67,20 @@ public:
 
         // 페어링 요청이 오면 BLE 광고 시작
         if (topic == topicRequest_ && !pairingRequested_) {
+            try {
+                // JSON 파싱 시도
+                json j = json::parse(payload);
+                if (j.contains("profile_id")) {
+                    std::string profileId = j["profile_id"];
+                    RCLCPP_INFO(get_logger(), "📋 Profile ID 수신: %s", profileId.c_str());
+                    currentProfileId_ = profileId;
+                } else {
+                    RCLCPP_WARN(get_logger(), "⚠️ JSON에 profile_id 필드가 없습니다");
+                }
+            } catch (const json::exception& e) {
+                RCLCPP_WARN(get_logger(), "⚠️ JSON 파싱 실패, 일반 페어링 요청으로 처리: %s", e.what());
+            }
+            
             RCLCPP_INFO(get_logger(), "🛎 페어링 요청 수신 → BLE 광고 시작");
             pairingRequested_ = true;
             seen_.clear();
@@ -302,6 +318,7 @@ private:
 
     std::string mqttHost_, mqttUser_, mqttPasswd_, sslCaPath_, proto_;
     std::string deviceId_, topicRequest_;
+    std::string currentProfileId_;
     int         mqttPort_{0}, keepAlive_{60};
 };
 

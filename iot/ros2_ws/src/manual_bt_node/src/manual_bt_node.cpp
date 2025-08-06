@@ -185,7 +185,7 @@ public:
     // GattCharacteristic이 호출할 데이터 발행 함수
     void publishPose(const std::vector<uint8_t>& data) {
         // 데이터 포맷: x(float, 4바이트), y(float, 4바이트), z(float, 4바이트) = 총 12바이트
-        if (data.size() < 12) {
+        if (data.size() < 3) {
             RCLCPP_WARN(this->get_logger(), "수신 데이터가 너무 짧습니다 (12바이트 필요). Size: %zu", data.size());
             return;
         }
@@ -193,10 +193,10 @@ public:
         geometry_msgs::msg::Point point_msg;
         
         // 바이트 배열에서 float 값을 추출
-        std::memcpy(&point_msg.x, &data[0], sizeof(float));
-        std::memcpy(&point_msg.y, &data[4], sizeof(float));
-        std::memcpy(&point_msg.z, &data[8], sizeof(float));
-        
+        float x = static_cast<float>(static_cast<int8_t>(data[0]));
+        float y = static_cast<float>(static_cast<int8_t>(data[1]));
+        float z = static_cast<float>(static_cast<int8_t>(data[2]));
+        point_msg.x = x; point_msg.y = y; point_msg.z = z;
         // /manual_pose 토픽으로 발행
         pose_pub_->publish(point_msg);
 
@@ -212,7 +212,6 @@ private:
         if (target_mac_ != new_mac) {
             RCLCPP_INFO(this->get_logger(), "새로운 타겟 MAC 주소 수신: %s", new_mac.c_str());
             target_mac_ = new_mac;
-            // TODO: 수신된 MAC 주소로 연결하는 로직 추가
         }
     }
 

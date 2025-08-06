@@ -31,6 +31,9 @@ if(NOT SDBUS_CPP_INCLUDE_DIR OR NOT SDBUS_CPP_LIB)
 endif()
 include_directories(${SDBUS_CPP_INCLUDE_DIR})
 
+# nlohmann/json
+find_package(nlohmann_json 3.2.0 REQUIRED)
+
 # xml2cpp로 생성된 GATT 서비스·특성 어댑터
 set(DBUS_INTERFACES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/dbus_interfaces/gatt_service.xml"
@@ -67,6 +70,7 @@ target_link_libraries(pairing_bridge_node
   ${PAHO_MQTT_CPP_LIB}
   ${PAHO_MQTT_C_LIB}
   ${SDBUS_CPP_LIB}
+  nlohmann_json::nlohmann_json
 )
 
 install(TARGETS pairing_bridge_node DESTINATION lib/${PROJECT_NAME})
