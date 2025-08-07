@@ -31,6 +31,7 @@ public class SecurityConfig {
                                 "/v3/api-docs",
                                 "/swagger-ui.html"
                         ).permitAll()
+                        .requestMatchers("/api/raw-postures/**").permitAll()
                         .requestMatchers(HttpMethod.DELETE, "/api/user").authenticated()
                         .requestMatchers("/api/auth/**").permitAll()
                         .anyRequest().authenticated()

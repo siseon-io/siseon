@@ -1,40 +1,52 @@
 package siseon.backend.scheduler;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.batch.core.Job;
-import org.springframework.batch.core.launch.JobLauncher;
 import org.springframework.batch.core.JobParametersBuilder;
-import org.springframework.stereotype.Component;
+import org.springframework.batch.core.launch.JobLauncher;
+import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
 import siseon.backend.repository.main.RawPostureRepository;
 
 import java.time.LocalDateTime;
 
-@RequiredArgsConstructor
+@Slf4j
 @Component
+@RequiredArgsConstructor
+@EnableScheduling
 public class PostureJobScheduler {
 
     private final JobLauncher jobLauncher;
     private final Job postureJob;
     private final RawPostureRepository rawPostureRepository;
 
-    @Scheduled(cron = "0 0/30 * * * ?")
-    public void runPostureJob() throws Exception {
-        long count = rawPostureRepository.count();
-        if (count == 0) {
-            System.out.println("[SKIP] raw_postures 테이블에 데이터 없음. Batch Job 생략됨.");
+    /**
+     * 매 10분 정각에 실행
+     */
+    @Scheduled(cron = "0 0/10 * * * ?")
+    public void runPostureJob() {
+        LocalDateTime end   = LocalDateTime.now();
+        LocalDateTime start = end.minusMinutes(10);
+
+        long countInWindow = rawPostureRepository.countByCollectedAtBetween(start, end);
+        if (countInWindow == 0) {
+            log.info("[SKIP] 최근 10분(raw_postures) 데이터 없음 ({} ~ {}). Batch Job 생략.", start, end);
             return;
         }
 
-        LocalDateTime now   = LocalDateTime.now();
-        LocalDateTime start = now.minusMinutes(30);
+        try {
+            var params = new JobParametersBuilder()
+                    .addString("startTime", start.toString())
+                    .addString("endTime",   end.toString())
+                    .addLong("run.id",      System.currentTimeMillis())
+                    .toJobParameters();
 
-        var params = new JobParametersBuilder()
-                .addString("startTime", start.toString())
-                .addString("endTime",   now.toString())
-                .addLong("run.id", System.currentTimeMillis())
-                .toJobParameters();
-
-        jobLauncher.run(postureJob, params);
+            jobLauncher.run(postureJob, params);
+            log.info("Posture batch job 실행: {} ~ {}", start, end);
+        } catch (Exception e) {
+            log.error("Posture batch job 실행 중 오류 발생", e);
+        }
     }
 }

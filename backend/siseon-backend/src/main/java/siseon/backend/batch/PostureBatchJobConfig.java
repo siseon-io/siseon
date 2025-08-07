@@ -5,122 +5,157 @@ import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.configuration.annotation.EnableBatchProcessing;
 import org.springframework.batch.core.job.builder.JobBuilder;
-import org.springframework.batch.core.step.builder.StepBuilder;
+import org.springframework.batch.core.launch.support.RunIdIncrementer;
 import org.springframework.batch.core.repository.JobRepository;
-import org.springframework.batch.item.data.RepositoryItemReader;
-import org.springframework.batch.item.data.builder.RepositoryItemReaderBuilder;
+import org.springframework.batch.core.step.builder.StepBuilder;
+import org.springframework.batch.repeat.RepeatStatus;
+import org.springframework.batch.core.step.tasklet.Tasklet;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.batch.core.configuration.annotation.StepScope;
-import org.springframework.batch.repeat.RepeatStatus;
-
 import org.springframework.transaction.PlatformTransactionManager;
-
 import siseon.backend.domain.main.RawPosture;
 import siseon.backend.domain.batch.PostureStats;
-import siseon.backend.domain.batch.PresetSuggestion;
-import siseon.backend.listener.RawPostureStepListener;
 import siseon.backend.repository.main.RawPostureRepository;
 import siseon.backend.repository.batch.PostureStatsRepository;
-import siseon.backend.repository.batch.PresetSuggestionRepository;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Configuration
 @EnableBatchProcessing(dataSourceRef = "batchDs", transactionManagerRef = "batchTx")
 @RequiredArgsConstructor
 public class PostureBatchJobConfig {
 
-    private final JobRepository jobRepository;
-
-    private final RawPostureRepository rawPostureRepository;
-    private final PostureStatsRepository postureStatsRepository;
-    private final PresetSuggestionRepository presetSuggestionRepository;
-
-    private final PlatformTransactionManager batchTx;
+    private final JobRepository            jobRepository;
+    private final RawPostureRepository     rawRepo;
+    private final PostureStatsRepository   statsRepo;
+    private final PlatformTransactionManager tx;
 
     @Bean
-    public Job postureJob(Step postureStep, Step cleanupStep) {
+    public Job postureJob(Step processStep, Step cleanupStep) {
         return new JobBuilder("postureJob", jobRepository)
-                .start(postureStep)
+                .incrementer(new RunIdIncrementer())
+                .start(processStep)
                 .next(cleanupStep)
                 .build();
     }
 
     @Bean
-    public Step postureStep(RawPostureStepListener listener) {
-        return new StepBuilder("postureStep", jobRepository)
-                .<RawPosture, PostureStats>chunk(500, batchTx)
-                .reader(reader(null, null))
-                .processor(this::toStat)
-                .writer(items -> postureStatsRepository.saveAll(items))
-                .listener(listener)
+    public Step processStep() {
+        return new StepBuilder("processStep", jobRepository)
+                .tasklet(processTasklet(), tx)
                 .build();
+    }
+
+    @Bean
+    public Tasklet processTasklet() {
+        return (contrib, ctx) -> {
+            LocalDateTime end   = LocalDateTime.now();
+            LocalDateTime start = end.minusMinutes(10);
+
+            List<RawPosture> raws = rawRepo.findByCollectedAtBetween(start, end);
+            if (raws.isEmpty()) {
+                return RepeatStatus.FINISHED;
+            }
+
+            // 프로필별 그룹핑
+            Map<Long, List<RawPosture>> grouped =
+                    raws.stream().collect(Collectors.groupingBy(RawPosture::getProfileId));
+
+            for (var entry : grouped.entrySet()) {
+                Long pid = entry.getKey();
+                List<RawPosture> list = entry.getValue();
+
+                // monitor_coord 평균
+                double avgX = list.stream()
+                        .mapToDouble(r -> ((Number) r.getMonitorCoord().get("x")).doubleValue())
+                        .average().orElse(0.0);
+                double avgY = list.stream()
+                        .mapToDouble(r -> ((Number) r.getMonitorCoord().get("y")).doubleValue())
+                        .average().orElse(0.0);
+                double avgZ = list.stream()
+                        .mapToDouble(r -> ((Number) r.getMonitorCoord().get("z")).doubleValue())
+                        .average().orElse(0.0);
+
+                // user_coord 평균 (le_pupil, re_pupil + pose_data...)
+                List<String> keys = List.of(
+                        "le_pupil","re_pupil",
+                        "nose","le_ear","re_ear","le_shoulder","re_shoulder",
+                        "le_elbow","re_elbow","le_wrist","re_wrist",
+                        "le_hip","re_hip","le_knee","re_knee","le_ankle","re_ankle"
+                );
+                Map<String,double[]> sums = new LinkedHashMap<>();
+                keys.forEach(k -> sums.put(k, new double[3]));
+
+                for (RawPosture r : list) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> user = r.getUserCoord();
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> pd = (Map<String, Object>) user.get("pose_data");
+
+                    // pupils
+                    for (String k : List.of("le_pupil","re_pupil")) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Number> p = (Map<String, Number>) user.get(k);
+                        double[] arr = sums.get(k);
+                        arr[0] += p.get("x").doubleValue();
+                        arr[1] += p.get("y").doubleValue();
+                        arr[2] += p.get("z").doubleValue();
+                    }
+                    // pose_data
+                    for (String k : keys.subList(2, keys.size())) {
+                        @SuppressWarnings("unchecked")
+                        Map<String, Number> p = (Map<String, Number>) pd.get(k);
+                        double[] arr = sums.get(k);
+                        arr[0] += p.get("x").doubleValue();
+                        arr[1] += p.get("y").doubleValue();
+                        arr[2] += p.get("z").doubleValue();
+                    }
+                }
+
+                Map<String,Object> userAvg = new LinkedHashMap<>();
+                for (String k : keys) {
+                    double[] s = sums.get(k);
+                    userAvg.put(k, Map.of(
+                            "x", s[0] / list.size(),
+                            "y", s[1] / list.size(),
+                            "z", s[2] / list.size()
+                    ));
+                }
+
+                // PostureStats 엔티티 생성
+                PostureStats stats = PostureStats.builder()
+                        .profileId(pid)
+                        .monitorCoord(Map.of("avgx", avgX, "avgy", avgY, "avgz", avgZ))
+                        .userCoord(Map.of(
+                                "le_pupil", userAvg.get("le_pupil"),
+                                "re_pupil", userAvg.get("re_pupil"),
+                                "pose_data", keys.subList(2, keys.size())
+                                        .stream().collect(Collectors.toMap(k -> k, userAvg::get, (a,b) -> b, LinkedHashMap::new))
+                        ))
+                        .startAt(start)
+                        .endAt(end)
+                        .durationSeconds((int) Duration.between(start, end).getSeconds())
+                        .slotIndex(start.getMinute())
+                        .build();
+
+                statsRepo.save(stats);
+            }
+
+            return RepeatStatus.FINISHED;
+        };
     }
 
     @Bean
     public Step cleanupStep() {
         return new StepBuilder("cleanupStep", jobRepository)
                 .tasklet((contrib, ctx) -> {
-                    var params = ctx.getStepContext()
-                            .getStepExecution()
-                            .getJobParameters();
-                    LocalDateTime start = LocalDateTime.parse(params.getString("startTime"));
-                    LocalDateTime end   = LocalDateTime.parse(params.getString("endTime"));
-                    rawPostureRepository.deleteAll(
-                            rawPostureRepository.findByCollectedAtBetween(start, end)
-                    );
+                    LocalDateTime end = LocalDateTime.now();
+                    rawRepo.deleteAll(rawRepo.findByCollectedAtLessThanEqual(end));
                     return RepeatStatus.FINISHED;
-                }, batchTx)
+                }, tx)
                 .build();
-    }
-
-    @Bean
-    @StepScope
-    public RepositoryItemReader<RawPosture> reader(
-            @org.springframework.beans.factory.annotation.Value("#{jobParameters['startTime']}") String st,
-            @org.springframework.beans.factory.annotation.Value("#{jobParameters['endTime']}")   String et) {
-
-        return new RepositoryItemReaderBuilder<RawPosture>()
-                .name("rawPostureReader")
-                .repository(rawPostureRepository)
-                .methodName("findByCollectedAtBetween")
-                .arguments(List.of(LocalDateTime.parse(st), LocalDateTime.parse(et)))
-                .pageSize(500)
-                .sorts(java.util.Collections.singletonMap("id", org.springframework.data.domain.Sort.Direction.ASC))
-                .build();
-    }
-
-    private PostureStats toStat(RawPosture raw) {
-        LocalDateTime end   = raw.getCollectedAt();
-        LocalDateTime start = end.minusMinutes(30);
-        int duration = (int) Duration.between(start, end).toSeconds();
-        int slotIndex = start.getHour() * 2 + start.getMinute() / 30;
-
-        var stat = new PostureStats();
-        stat.setProfileId(raw.getProfileId());
-        stat.setAvgX(raw.getX()); stat.setAvgY(raw.getY()); stat.setAvgZ(raw.getZ());
-        stat.setStartAt(start); stat.setEndAt(end);
-        stat.setDurationSeconds(duration);
-        stat.setSlotIndex(slotIndex);
-
-        if (slotIndex % 2 == 1) {
-            postureStatsRepository.findByProfileIdAndSlotIndex(raw.getProfileId(), slotIndex - 1)
-                    .ifPresent(prev -> {
-                        double dx = stat.getAvgX() - prev.getAvgX();
-                        double dy = stat.getAvgY() - prev.getAvgY();
-                        double dz = stat.getAvgZ() - prev.getAvgZ();
-                        double dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
-                        final double THRESHOLD = 5.0;
-                        if (dist <= THRESHOLD) {
-                            var sug = new PresetSuggestion();
-                            org.springframework.beans.BeanUtils.copyProperties(stat, sug, "id","createdAt");
-                            presetSuggestionRepository.save(sug);
-                        }
-                    });
-        }
-        return stat;
     }
 }

@@ -67,6 +67,9 @@ public class Profile {
     @OneToMany(mappedBy = "profile", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<Preset> presets = new ArrayList<>();
 
+    @OneToOne(mappedBy = "profileId", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private Device device;
+
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -83,5 +86,17 @@ public class Profile {
     public void removePreset(Preset preset) {
         presets.remove(preset);
         preset.setProfile(null);
+    }
+
+    public void setDevice(Device device) {
+        this.device = device;
+        if (device != null) device.setProfileId(this);
+    }
+
+    public void removeDevice() {
+        if (this.device != null) {
+            this.device.setProfileId(null);
+            this.device = null;
+        }
     }
 }
