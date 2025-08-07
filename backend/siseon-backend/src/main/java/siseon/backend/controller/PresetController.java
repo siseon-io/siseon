@@ -18,13 +18,26 @@ public class PresetController {
 
     private final PresetService presetService;
 
+    // manual
     @PostMapping
-    public ResponseEntity<PresetResponse> createPreset(@RequestBody @Valid PresetRequest request) {
-        return ResponseEntity.ok(presetService.createPreset(request));
+    public ResponseEntity<PresetResponse> createPreset(
+            @RequestBody @Valid PresetRequest request
+    ) {
+        return ResponseEntity.ok(presetService.createFromRaw(request));
+    }
+
+    // confirm
+    @PostMapping("/confirm")
+    public ResponseEntity<PresetResponse> confirmPreset(
+            @RequestBody @Valid PresetRequest request
+    ) {
+        return ResponseEntity.ok(presetService.createFromStats(request));
     }
 
     @GetMapping("/profile/{profileId}")
-    public ResponseEntity<List<PresetResponse>> getPresetsByProfile(@PathVariable Long profileId) {
+    public ResponseEntity<List<PresetResponse>> getPresetsByProfile(
+            @PathVariable Long profileId
+    ) {
         return ResponseEntity.ok(presetService.getPresetsByProfile(profileId));
     }
 
@@ -41,5 +54,4 @@ public class PresetController {
         presetService.deletePreset(presetId);
         return ResponseEntity.noContent().build();
     }
-
 }

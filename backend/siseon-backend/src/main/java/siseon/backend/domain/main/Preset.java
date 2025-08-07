@@ -12,21 +12,14 @@ import java.util.Map;
 
 @Entity
 @Table(name = "preset")
-@Getter
-@Setter
-@NoArgsConstructor
-@AllArgsConstructor
-@Builder
+@Getter @Setter
+@NoArgsConstructor @AllArgsConstructor @Builder
 public class Preset {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "preset_id")
     private Long presetId;
-
-    @NotNull
-    @Column(name = "device_id", nullable = false)
-    private Long deviceId;
 
     @NotNull
     @ManyToOne(fetch = FetchType.LAZY)
@@ -37,11 +30,10 @@ public class Preset {
     @Column(nullable = false, length = 100)
     private String name;
 
-    @Lob
     @NotNull
     @Convert(converter = JsonConverter.class)
-    @Column(columnDefinition = "JSON", nullable = false)
-    private Map<String, Object> position;
+    @Column(name = "monitor_coord", columnDefinition = "JSON", nullable = false)
+    private Map<String, Object> monitorCoord;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
