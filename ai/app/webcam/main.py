@@ -3,12 +3,15 @@
 
 import logging
 import cv2
+import numpy as np
 
 from utils import init_logging, set_seed, configure_device
 from app.webcam.capture import init_video_capture
 from app.webcam.loader import load_model, load_pose_model
-from app.webcam.postproc import extract_eye_coords, extract_pose_keypoints
+from app.webcam.postproc import extract_eye_centers, extract_pose_keypoints
 from app.webcam.draw import draw_bboxes, draw_pose
+
+from net.sender import send_all
 
 def main(
     model_path: str,
@@ -49,13 +52,21 @@ def main(
 
         # --- Gaze 추론 및 그리기 ---
         gaze_results = gaze_model.predict(source=frame, verbose=False)
-        eye_centers  = extract_eye_coords(gaze_results)
-        frame        = draw_bboxes(frame, gaze_results)
+        left_eye, right_eye = extract_eye_centers(gaze_results)
+        frame = draw_bboxes(frame, gaze_results)
 
         # --- Pose 추론 및 그리기 ---
         pose_results = pose_model(frame, verbose=False)
-        kpts         = extract_pose_keypoints(pose_results)
-        frame        = draw_pose(frame, kpts)
+        kpts = extract_pose_keypoints(pose_results)
+        frame = draw_pose(frame, kpts)
+
+        # --- 데이터 전송 ---
+        pose_pts = kpts[:, :2]
+        send_all(
+            left_eye[0], left_eye[1],
+            right_eye[0], right_eye[1],
+            pose_pts
+        )
 
         # --- 화면 표시 ---
         cv2.imshow('Webcam Eye & Pose', frame)
