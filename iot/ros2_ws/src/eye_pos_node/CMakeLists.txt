@@ -18,6 +18,9 @@ find_package(nlohmann_json REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(ASIO REQUIRED IMPORTED_TARGET asio)
 
+# libcurl
+find_package(CURL REQUIRED)
+
 # websocketpp is header-only; cloned under websocketpp/
 include_directories(
   ${PROJECT_SOURCE_DIR}/websocketpp
@@ -38,6 +41,7 @@ target_include_directories(eye_pos_node PRIVATE
 
 # Link header-only libraries (no PRIVATE keyword to match ament_target_dependencies signature)
 target_link_libraries(eye_pos_node
+  CURL::libcurl
   PkgConfig::ASIO
   nlohmann_json::nlohmann_json
 )
