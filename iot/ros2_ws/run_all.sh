@@ -18,7 +18,7 @@ ros2 run arm_control_node arm_control_node &
 ros2 run control_bridge_node control_bridge_node &
 ros2 run eye_pos_node eye_pos_node &
 ros2 run fusion_node fusion_node &
-ros2 run lidar_node lidar_node &
+ros2 launch lidar_node person_detector_launch.py &
 ros2 run manual_bt_node manual_bt_node &
 ros2 run pairing_bridge_node pairing_bridge_node &
 ros2 run preset_bridge_node preset_bridge_node &
