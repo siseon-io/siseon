@@ -1,0 +1,24 @@
+# Web framework
+fastapi>=0.100.0,<0.110.0
+uvicorn[standard]>=0.23.2
+
+# 설정 파일 & 환경변수
+python-dotenv==1.1.1
+PyYAML==6.0.2
+
+# HTTP client for LLM 호출
+requests==2.32.4
+
+# RAG용 벡터 스토어 & 임베딩
+faiss-cpu==1.11.0.post1
+sentence-transformers==5.0.0
+
+# LangChain core
+langchain==0.3.27
+langchain-community==0.3.27
+
+# Optional: Anthropic 키 사용 시
+anthropic==0.61.0
+
+# PDF 로딩
+pypdf==5.9.0
