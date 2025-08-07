@@ -63,7 +63,7 @@ inference:
   cam_width: 640              # 캡처 프레임 너비
   cam_height: 480             # 캡처 프레임 높이
   weights: 'weights/best_gaze.pt'      # gaze 모델 weights 위치
-  pose_weights: 'weights/best_pose.pt' # pose 모델 weights 위치
+  pose_weights: 'yolo11n-pose.pt' # pose 모델 weights 위치 'weights/best_pose.pt'
 
 # ======================
 # 하이퍼파라미터 최적화
