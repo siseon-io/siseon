@@ -41,7 +41,7 @@ class _PresetPageState extends State<PresetPage> {
       return;
     }
 
-    final dummyName = '새 프리셋 ${_presets.length + 1}';
+    final dummyName = '프리셋 ${_presets.length + 1}';
     final created = await PresetService.createPreset(dummyName, _profileId!, 1);
 
     if (created != null) {
@@ -147,7 +147,8 @@ class _PresetPageState extends State<PresetPage> {
     );
 
     if (confirmed == true) {
-      final deleted = await PresetService.deletePreset(preset['presetId']);
+      print('🛠 삭제 요청 ID: ${preset['id']}'); // ✅ 로그 확인
+      final deleted = await PresetService.deletePreset(preset['id']); // ✅ 수정
       if (deleted) {
         await _loadProfileAndPresets();
         _showSnackBar('✅ 프리셋이 삭제되었습니다');
@@ -156,6 +157,7 @@ class _PresetPageState extends State<PresetPage> {
       }
     }
   }
+
 
   void _showSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -179,7 +181,7 @@ class _PresetPageState extends State<PresetPage> {
         title: const Text('프리셋', style: TextStyle(fontWeight: FontWeight.bold)),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () => Navigator.pop(context,true),
         ),
       ),
       body: SafeArea(
@@ -206,7 +208,7 @@ class _PresetPageState extends State<PresetPage> {
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.save, size: 18, color: Colors.white),
                   onPressed: () {
-                    Navigator.pop(context);
+                    Navigator.pop(context, true);
                     _showSnackBar('✅ 저장되었습니다');
                   },
                   style: ElevatedButton.styleFrom(

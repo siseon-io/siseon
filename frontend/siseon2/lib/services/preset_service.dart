@@ -48,14 +48,8 @@ class PresetService {
     final token = await AuthService.getValidAccessToken();
     final url = Uri.parse('$baseUrl/api/preset');
     final body = {
-      'name': name,
       'profileId': profileId,
-      'deviceId': deviceId,
-      'position': {
-        'x': 0,
-        'y': 0,
-        'z': 0,
-      },
+      'name': name,
     };
 
     print('📤 createPreset 요청 URL: $url');

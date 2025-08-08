@@ -7,16 +7,17 @@ import '../../services/auth_service.dart';
 import '../../services/profile_cache_service.dart';
 import 'edit_profile.dart';
 import 'preset_page.dart';
-import 'update_page.dart';
+import 'device_info.dart';
+import 'package:siseon2/pages/settings/stats_page.dart'; // ✅ 통계 페이지 import
 
-class ProfilePage extends StatefulWidget {
-  const ProfilePage({super.key});
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key});
 
   @override
-  State<ProfilePage> createState() => _ProfilePageState();
+  State<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _ProfilePageState extends State<ProfilePage> {
+class _SettingsPageState extends State<SettingsPage> {
   String? _name;
   String? _imageUrl;
   int? _selectedProfileId;
@@ -366,6 +367,12 @@ class _ProfilePageState extends State<ProfilePage> {
               MaterialPageRoute(builder: (_) => const EditProfilePage()),
             ).then((_) => _fetchProfile());
           }),
+          _buildMenuItem(Icons.bar_chart, '통계 보기', () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const StatsPage()),
+            );
+          }),
           _buildMenuItem(Icons.favorite, '프리셋', () {
             Navigator.push(
               context,
@@ -375,7 +382,7 @@ class _ProfilePageState extends State<ProfilePage> {
           _buildMenuItem(Icons.system_update_alt, '펌웨어 업데이트', () {
             Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => const UpdatePage()),
+              MaterialPageRoute(builder: (_) => const DeviceInfoPage()),
             );
           }),
           _buildMenuItem(Icons.logout, '로그아웃', () {

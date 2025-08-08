@@ -11,7 +11,7 @@ class BleScanScreen extends StatefulWidget {
 class _BleScanScreenState extends State<BleScanScreen> {
   final Map<String, BluetoothDevice> _foundDevices = {};
   String? _selectedMac;
-  List<String> _logs = [];
+  final List<String> _logs = [];
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _writableChar;
 
@@ -30,7 +30,12 @@ class _BleScanScreenState extends State<BleScanScreen> {
     _connectedDevice = null;
     _writableChar   = null;
 
-    FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
+    // 오직 TARGET_SERVICE_UUID 를 광고하는 기기만 스캔
+    FlutterBluePlus.startScan(
+      timeout: const Duration(seconds: 5),
+      withServices: [Guid(TARGET_SERVICE_UUID)],
+    );
+
     FlutterBluePlus.scanResults.listen((results) {
       setState(() {
         for (var r in results) {
@@ -52,7 +57,7 @@ class _BleScanScreenState extends State<BleScanScreen> {
 
     _addLog('🔌 Connecting to $mac...');
     try {
-      _addLog('🧹 Cleaning previous connection...');
+      // 이전 연결 초기화
       try {
         await device.disconnect();
       } catch (_) {}
@@ -62,38 +67,28 @@ class _BleScanScreenState extends State<BleScanScreen> {
         autoConnect: false,
         timeout: const Duration(seconds: 10),
       );
-      _addLog('✅ Connected to $mac');
-      _connectedDevice = device;
+      _addLog('✅ Connected');
 
+      _connectedDevice = device;
       final services = await device.discoverServices();
-      _addLog('🧪 Found ${services.length} services');
+      _addLog('🧪 Services found: ${services.length}');
 
       for (var service in services) {
-        final serviceUuid = service.uuid.toString().toLowerCase();
-        _addLog('🔍 Checking service: $serviceUuid');
         for (var char in service.characteristics) {
-          final charUuid = char.uuid.toString().toLowerCase();
-          _addLog('📍 Characteristic: $charUuid');
-          if (charUuid == TARGET_CHAR_UUID &&
+          final uuid = char.uuid.toString().toLowerCase();
+          if (uuid == TARGET_CHAR_UUID &&
               char.properties.write &&
               char.properties.read) {
             _addLog('✅ Found writable+readable characteristic');
             _writableChar = char;
-
-            // Write 테스트
-            final dataToSend = [0x41, 0x42, 0x43]; // "ABC"
-            await char.write(dataToSend);
-            _addLog('📤 Wrote data: ${_toHex(dataToSend)}');
-
-            // Read 테스트
-            final received = await char.read();
-            _addLog('📥 Read data: ${_toHex(received)}');
+            break;
           }
         }
+        if (_writableChar != null) break;
       }
 
       if (_writableChar == null) {
-        _addLog('⚠️ Writable+Readable characteristic not found!');
+        _addLog('⚠️ Writable+Readable not found');
       } else {
         Navigator.pop(context, {
           'device': _connectedDevice,
@@ -105,9 +100,6 @@ class _BleScanScreenState extends State<BleScanScreen> {
     }
   }
 
-  String _toHex(List<int> bytes) =>
-      bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
-
   void _addLog(String msg) {
     setState(() {
       _logs.insert(0, msg);
@@ -118,7 +110,6 @@ class _BleScanScreenState extends State<BleScanScreen> {
   @override
   void dispose() {
     FlutterBluePlus.stopScan();
-    // 연결 유지하도록 disconnect 호출 제거!
     super.dispose();
   }
 
@@ -132,7 +123,9 @@ class _BleScanScreenState extends State<BleScanScreen> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: _selectedMac == null ? _deviceListView() : _logView(),
+        child: _selectedMac == null
+            ? _deviceListView()
+            : _logView(),
       ),
     );
   }
@@ -150,7 +143,7 @@ class _BleScanScreenState extends State<BleScanScreen> {
     if (devices.isEmpty) {
       return const Center(
         child: Text(
-          '📰 Scanning for devices...',
+          '📰 No devices with target service found',
           style: TextStyle(fontSize: 16),
         ),
       );
@@ -159,24 +152,19 @@ class _BleScanScreenState extends State<BleScanScreen> {
     return ListView.separated(
       itemCount: devices.length,
       separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final entry = devices[index];
-        final mac = entry.key;
-        final name = entry.value.name.isNotEmpty
-            ? entry.value.name
-            : 'Unknown';
+      itemBuilder: (context, idx) {
+        final entry = devices[idx];
+        final mac  = entry.key;
+        final name = entry.value.name.isNotEmpty ? entry.value.name : 'Unknown';
         return Card(
           elevation: 4,
-          shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: ListTile(
             leading: const Icon(Icons.bluetooth, color: Colors.blueGrey),
             title: Text(name,
-                style: const TextStyle(
-                    fontSize: 18, fontWeight: FontWeight.bold)),
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             subtitle: Text(mac,
-                style: const TextStyle(
-                    fontSize: 14, color: Colors.black54)),
+                style: const TextStyle(fontSize: 14, color: Colors.black54)),
             onTap: () => _onSelectDevice(mac),
           ),
         );
@@ -186,18 +174,18 @@ class _BleScanScreenState extends State<BleScanScreen> {
 
   Widget _logView() {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('🔗 연결 로그',
+        const Text('🔗 Connection Logs',
             style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
         Expanded(
           child: ListView.builder(
             itemCount: _logs.length,
-            reverse: true,
-            itemBuilder: (context, index) {
+            itemBuilder: (context, idx) {
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4.0),
-                child: Text(_logs[index]),
+                child: Text(_logs[idx]),
               );
             },
           ),

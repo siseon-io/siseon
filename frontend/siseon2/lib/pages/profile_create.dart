@@ -20,7 +20,6 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
   String _visionLeft = '';
   String _visionRight = '';
 
-  /// 🔥 아바타 이름 매핑
   final Map<String, String> _avatarNames = {
     'profile_frog': '개구리',
     'profile_cat': '고양이',
@@ -47,91 +46,93 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: Colors.black,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) {
-        return SizedBox(
-          height: 300,
-          child: Column(
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(12),
-                child: Text('생년월일 선택',
-                    style: TextStyle(color: Colors.white, fontSize: 18)),
-              ),
-              Expanded(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: CupertinoPicker(
-                        scrollController: FixedExtentScrollController(
-                            initialItem: selectedYear - 1900),
-                        itemExtent: 40,
-                        onSelectedItemChanged: (index) {
-                          selectedYear = 1900 + index;
-                        },
-                        children: List.generate(
-                          126,
-                              (index) => Center(
-                            child: Text('${1900 + index}년',
-                                style: TextStyle(color: Colors.white)),
-                          ),
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: CupertinoPicker(
-                        scrollController: FixedExtentScrollController(
-                            initialItem: selectedMonth - 1),
-                        itemExtent: 40,
-                        onSelectedItemChanged: (index) {
-                          selectedMonth = index + 1;
-                        },
-                        children: List.generate(
-                          12,
-                              (index) => Center(
-                            child: Text('${index + 1}월',
-                                style: TextStyle(color: Colors.white)),
-                          ),
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: CupertinoPicker(
-                        scrollController: FixedExtentScrollController(
-                            initialItem: selectedDay - 1),
-                        itemExtent: 40,
-                        onSelectedItemChanged: (index) {
-                          selectedDay = index + 1;
-                        },
-                        children: List.generate(
-                          31,
-                              (index) => Center(
-                            child: Text('${index + 1}일',
-                                style: TextStyle(color: Colors.white)),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+        return Padding(
+          padding: MediaQuery.of(context).viewInsets,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  '생년월일 선택',
+                  style: TextStyle(color: Colors.white, fontSize: 18),
                 ),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  setState(() {
-                    _birthDate = DateTime(selectedYear, selectedMonth, selectedDay);
-                  });
-                  Navigator.pop(context);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF3B82F6),
+                const SizedBox(height: 12),
+                SizedBox(
+                  height: 200,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: CupertinoPicker(
+                          scrollController: FixedExtentScrollController(initialItem: selectedYear - 1900),
+                          itemExtent: 40,
+                          onSelectedItemChanged: (index) {
+                            selectedYear = 1900 + index;
+                          },
+                          children: List.generate(
+                            126,
+                                (index) => Center(
+                              child: Text('${1900 + index}년', style: const TextStyle(color: Colors.white)),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: CupertinoPicker(
+                          scrollController: FixedExtentScrollController(initialItem: selectedMonth - 1),
+                          itemExtent: 40,
+                          onSelectedItemChanged: (index) {
+                            selectedMonth = index + 1;
+                          },
+                          children: List.generate(
+                            12,
+                                (index) => Center(
+                              child: Text('${index + 1}월', style: const TextStyle(color: Colors.white)),
+                            ),
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: CupertinoPicker(
+                          scrollController: FixedExtentScrollController(initialItem: selectedDay - 1),
+                          itemExtent: 40,
+                          onSelectedItemChanged: (index) {
+                            selectedDay = index + 1;
+                          },
+                          children: List.generate(
+                            31,
+                                (index) => Center(
+                              child: Text('${index + 1}일', style: const TextStyle(color: Colors.white)),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                child: const Text('확인'),
-              ),
-              const SizedBox(height: 10),
-            ],
+                const SizedBox(height: 16),
+                SafeArea(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      setState(() {
+                        _birthDate = DateTime(selectedYear, selectedMonth, selectedDay);
+                      });
+                      Navigator.pop(context);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF3B82F6),
+                    ),
+                    child: const Text('확인'),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -148,7 +149,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
       builder: (ctx) {
         return Container(
           padding: const EdgeInsets.all(20),
-          height: 350,
+          height: 360,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -164,6 +165,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
               const SizedBox(height: 16),
               Expanded(
                 child: GridView.builder(
+                  shrinkWrap: true,
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 3,
                     crossAxisSpacing: 16,
@@ -194,20 +196,21 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                               backgroundColor: Colors.grey[900],
                               backgroundImage: path != null ? AssetImage(path) : null,
                               child: path == null
-                                  ? const Icon(Icons.person_off,
-                                  size: 30, color: Colors.grey)
+                                  ? const Icon(Icons.person_off, size: 30, color: Colors.grey)
                                   : null,
                             ),
                           ),
                           const SizedBox(height: 6),
-                          Text(
-                            path == null
-                                ? '없음'
-                                : _avatarNames[path.split('/').last.split('.').first] ??
-                                '아바타',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 13,
+                          Flexible(
+                            child: Text(
+                              path == null ? '' : _avatarNames[path.split('/').last.split('.').first] ?? '아바타',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                              textAlign: TextAlign.center,
                             ),
                           ),
                         ],
@@ -279,9 +282,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                 child: CircleAvatar(
                   radius: 50,
                   backgroundColor: Colors.grey[900],
-                  backgroundImage: _selectedAvatar != null
-                      ? AssetImage(_selectedAvatar!)
-                      : null,
+                  backgroundImage: _selectedAvatar != null ? AssetImage(_selectedAvatar!) : null,
                   child: _selectedAvatar == null
                       ? const Icon(Icons.person, size: 50, color: Colors.white30)
                       : null,

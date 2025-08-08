@@ -1,36 +1,39 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // ✅ dotenv 추가
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_core/firebase_core.dart';
-
 import 'package:siseon2/services/mqtt_service.dart';
 import 'package:siseon2/services/auth_service.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
+import 'package:siseon2/services/device_cache_service.dart'; // ✅ 기기 캐시
 import 'package:siseon2/services/fcm_service.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
 import '/login_screen.dart';
 import '/profile_select_screen.dart';
 
-/// 전역 네비게이터 키 (알림 팝업에 사용)
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ✅ 환경변수 로드 (.env)
+  // ✅ 한국어 로케일 초기화 (에러 해결)
+  await initializeDateFormatting('ko_KR', null);
+
+  // ✅ 환경 변수 로드
   await dotenv.load(fileName: ".env");
 
-  // ✅ Firebase 초기화 (FCM 사용을 위해 반드시 선행)
+  // ✅ Firebase 초기화
   await Firebase.initializeApp();
 
   // ✅ MQTT 연결
   await mqttService.connect();
 
-  // ✅ 세로 화면 고정
+  // ✅ 세로 고정
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
   runApp(const MyApp());
 }
+
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -38,7 +41,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      navigatorKey: navigatorKey, // ✅ 전역 navigatorKey 등록
+      navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         fontFamily: 'Pretendard',
@@ -66,13 +69,16 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> initApp() async {
     await Future.delayed(const Duration(seconds: 2));
 
-    // ✅ FCM 초기화 (Firebase 초기화 후 실행)
+    // ✅ FCM 초기화
     await FCMService.initialize();
 
-    // ✅ 로그인 여부 확인 후 화면 분기
+    // ✅ 로그인 여부 확인
     final token = await AuthService.getValidAccessToken();
     if (token != null) {
-      await ProfileCacheService.clearProfile();
+      // ✅ 로그인된 상태라면 캐시에서 프로필과 기기 정보 불러오기
+      await ProfileCacheService.loadProfile();
+      await DeviceCacheService.loadDevice();
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const ProfileSelectScreen()),

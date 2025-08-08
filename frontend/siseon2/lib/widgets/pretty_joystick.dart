@@ -48,7 +48,7 @@ class _PrettyJoystickState extends State<PrettyJoystick> with SingleTickerProvid
     );
 
     setState(() => _stickOffset = offset);
-    widget.onMove?.call(offset / maxRadius); // 정규화된 값
+    widget.onMove?.call(offset / maxRadius);
   }
 
   @override
