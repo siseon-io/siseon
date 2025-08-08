@@ -113,7 +113,7 @@ private:
       out.point.y = selected_center.second;
       out.point.z = 0.0;
       pub_->publish(out);
-      RCLCPP_INFO(this->get_logger(), "Detected person at %.2fm", min_dist);
+      // RCLCPP_INFO(this->get_logger(), "Detected person at %.2fm", min_dist);
     }
   }
 };
