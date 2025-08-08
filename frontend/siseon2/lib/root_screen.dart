@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
 import 'pages/home_screen.dart';
 import 'pages/manual_page.dart';
-import 'pages/stats_page.dart';
-import 'pages/settings/profile_page.dart';
+import 'pages/chatbot_page.dart';
+import 'pages/settings/settings_page.dart'; // ✅ SettingsPage 클래스 사용
+import 'package:siseon2/models/control_mode.dart';
 
 class RootScreen extends StatefulWidget {
   const RootScreen({super.key});
@@ -14,38 +16,28 @@ class RootScreen extends StatefulWidget {
 }
 
 class _RootScreenState extends State<RootScreen> {
-  final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>(); // ✅ HomeScreen State 접근용 키
-  late List<Widget> _pages;
-  int _currentIndex = 0;
+  final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
 
-  BluetoothCharacteristic? _writableChar; // ✅ BLE 연결 여부 판단용
+  int _currentIndex = 0;
+  BluetoothCharacteristic? _writableChar;
+
+  // 루트에서 보유하는 현재 모드(홈과 동기화)
+  ControlMode _currentMode = ControlMode.auto;
 
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color rootBackground = Color(0xFF161B22);
   static const Color inactiveGrey = Colors.grey;
 
-  @override
-  void initState() {
-    super.initState();
-    _pages = [
-      HomeScreen(
-        key: _homeKey,
-        onAiModeSwitch: _handleAiModeFromHome,
-        onConnect: (char) {
-          setState(() {
-            _writableChar = char; // ✅ BLE 연결 시 characteristic 저장
-          });
-        },
-      ),
-      const StatsPage(),
-      const ProfilePage(),
-    ];
+  /// 설정 탭으로 이동 (HomeScreen의 onGoToProfile 콜백에 연결)
+  void _goToSettingsPage() {
+    setState(() {
+      _currentIndex = 2; // 0: 홈, 1: 챗봇, 2: 설정
+    });
   }
 
-  /// ✅ RootScreen → HomeScreen의 AI 모드 전환 메서드 호출
-  void _switchToAIMode() {
-    _homeKey.currentState?.switchToAiMode(); // ✅ MQTT 발행은 HomeScreen이 전담
-
+  /// 홈/FAB에서 AI 모드 전환 요청
+  void _handleAiModeFromHome() {
+    _homeKey.currentState?.setModeExternal(ControlMode.auto); // Home 쪽 단일 진입점
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('🤖 AI 모드로 전환됩니다.'),
@@ -54,56 +46,84 @@ class _RootScreenState extends State<RootScreen> {
     );
   }
 
-  /// ✅ HomeScreen에서 콜백으로 전달된 AI 모드 전환 처리
-  void _handleAiModeFromHome() {
-    debugPrint("🔄 RootScreen에서 HomeScreen의 AI 모드 콜백 실행됨");
-  }
-
-  /// ✅ 탭 선택
+  /// 탭 전환
   Future<void> _selectTab(int idx) async {
+    // 챗봇/설정은 세로 고정
     if (idx == 1 || idx == 2) {
       await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     }
     setState(() => _currentIndex = idx);
   }
 
-  /// ✅ BLE 연결됐으면 ManualPage로 이동, 아니면 스낵바
+  /// 수동 진입: 먼저 Home 상태 manual로 전환(발행 포함) → 안내 → 가로 회전 → ManualPage
   Future<void> _handleManualTap() async {
-    if (_writableChar != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('3초 뒤 매뉴얼 화면으로 전환됩니다.'), duration: Duration(seconds: 2)),
-      );
-      await Future.delayed(const Duration(seconds: 3));
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
-
-      if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => ManualPage(writableChar: _writableChar!)),
-      ).then((_) async {
-        // 돌아오면 세로 모드 복귀
-        await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-      });
-    } else {
+    if (_writableChar == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('⚠️ 먼저 BLE 기기를 연결해주세요.'),
           duration: Duration(seconds: 2),
         ),
       );
+      return;
     }
+
+    _homeKey.currentState?.setModeExternal(ControlMode.manual);
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('3초 뒤 매뉴얼 화면으로 전환됩니다.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+
+    await Future.delayed(const Duration(seconds: 3));
+
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ManualPage(writableChar: _writableChar!)),
+    );
+
+    // 복귀 시 세로로 복구
+    await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   }
 
   @override
   Widget build(BuildContext context) {
+    // 하단 안전 영역(inset) 반영
+    final bottomInset = MediaQuery.of(context).padding.bottom;
+
+    final pages = [
+      HomeScreen(
+        key: _homeKey,
+        onAiModeSwitch: _handleAiModeFromHome, // 홈 내부에서 호출해도 안전
+        onGoToProfile: _goToSettingsPage,      // ✅ 설정으로 이동
+        onConnect: (char) {
+          setState(() {
+            _writableChar = char;
+          });
+        },
+        // ★ 루트↔홈 모드 동기화
+        currentMode: _currentMode,
+        onModeChange: (mode) {
+          setState(() => _currentMode = mode);
+        },
+      ),
+      const ChatbotPage(),
+      const SettingsPage(), // ✅ 설정 페이지(클래스명 SettingsPage)
+    ];
+
     return Scaffold(
       extendBody: true,
       backgroundColor: rootBackground,
-      body: _pages[_currentIndex],
+      body: pages[_currentIndex],
 
+      // 가운데 FAB = AI 모드 스위치
       floatingActionButton: Container(
         decoration: BoxDecoration(
           shape: BoxShape.circle,
@@ -117,7 +137,7 @@ class _RootScreenState extends State<RootScreen> {
           ],
         ),
         child: FloatingActionButton(
-          onPressed: _switchToAIMode, // ✅ AI 모드 버튼
+          onPressed: _handleAiModeFromHome,
           backgroundColor: primaryBlue,
           elevation: 0,
           child: const Icon(Icons.remove_red_eye, size: 30, color: Colors.white),
@@ -126,7 +146,8 @@ class _RootScreenState extends State<RootScreen> {
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
 
       bottomNavigationBar: Container(
-        height: 85,
+        height: 85 + bottomInset,
+        padding: EdgeInsets.only(bottom: bottomInset),
         decoration: const BoxDecoration(
           border: Border(top: BorderSide(color: Colors.white12, width: 1)),
           color: rootBackground,
@@ -135,10 +156,10 @@ class _RootScreenState extends State<RootScreen> {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             _buildTabItem(Icons.home, '홈', 0),
-            _buildManualTabItem(Icons.menu_book_rounded, '매뉴얼'),
-            const SizedBox(width: 60),
-            _buildTabItem(Icons.bar_chart_rounded, '통계', 1),
-            _buildTabItem(Icons.person, '프로필', 2),
+            _buildManualTabItem(Icons.menu_book_rounded, '수동'),
+            const SizedBox(width: 60), // FAB 자리
+            _buildTabItem(Icons.chat_bubble_rounded, '챗봇', 1),
+            _buildTabItem(Icons.settings, '설정', 2),
           ],
         ),
       ),
@@ -173,8 +194,8 @@ class _RootScreenState extends State<RootScreen> {
     );
   }
 
-  /// ✅ BLE 연결됐을 때만 진입 가능한 매뉴얼 탭
   Widget _buildManualTabItem(IconData icon, String label) {
+    // BLE 연결되면 파랑, 아니면 회색
     final isActive = _writableChar != null;
     final color = isActive ? primaryBlue : inactiveGrey;
 
