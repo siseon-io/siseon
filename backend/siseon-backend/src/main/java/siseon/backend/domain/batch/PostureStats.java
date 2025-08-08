@@ -35,4 +35,7 @@ public class PostureStats {
     private int durationSeconds;
     private int slotIndex;
 
+    @Column(name = "valid_posture", nullable = true)
+    private Boolean validPosture;
+
 }

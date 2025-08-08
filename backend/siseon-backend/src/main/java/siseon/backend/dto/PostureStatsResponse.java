@@ -19,6 +19,7 @@ public class PostureStatsResponse {
     private LocalDateTime endAt;
     private int durationSeconds;
     private int slotIndex;
+    private Boolean validPosture;
 
     public static PostureStatsResponse from(PostureStats entity) {
         return PostureStatsResponse.builder()
@@ -30,6 +31,7 @@ public class PostureStatsResponse {
                 .endAt(entity.getEndAt())
                 .durationSeconds(entity.getDurationSeconds())
                 .slotIndex(entity.getSlotIndex())
+                .validPosture(entity.getValidPosture())
                 .build();
     }
 }

@@ -8,8 +8,8 @@ import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
 import org.springframework.batch.core.repository.JobRepository;
 import org.springframework.batch.core.step.builder.StepBuilder;
-import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.batch.core.step.tasklet.Tasklet;
+import org.springframework.batch.repeat.RepeatStatus;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -20,7 +20,8 @@ import siseon.backend.repository.batch.PostureStatsRepository;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.*;
+import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Configuration
@@ -28,9 +29,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PostureBatchJobConfig {
 
-    private final JobRepository            jobRepository;
-    private final RawPostureRepository     rawRepo;
-    private final PostureStatsRepository   statsRepo;
+    private static final double VALID_RATIO = 0.8; // 80%% 이상이면 정상으로 판단
+
+    private final JobRepository jobRepository;
+    private final RawPostureRepository rawRepo;
+    private final PostureStatsRepository statsRepo;
     private final PlatformTransactionManager tx;
 
     @Bean
@@ -56,19 +59,35 @@ public class PostureBatchJobConfig {
             LocalDateTime start = end.minusMinutes(10);
 
             List<RawPosture> raws = rawRepo.findByCollectedAtBetween(start, end);
-            if (raws.isEmpty()) {
-                return RepeatStatus.FINISHED;
-            }
+            if (raws.isEmpty()) return RepeatStatus.FINISHED;
 
-            // 프로필별 그룹핑
-            Map<Long, List<RawPosture>> grouped =
-                    raws.stream().collect(Collectors.groupingBy(RawPosture::getProfileId));
+            var grouped = raws.stream()
+                    .collect(Collectors.groupingBy(RawPosture::getProfileId));
 
             for (var entry : grouped.entrySet()) {
                 Long pid = entry.getKey();
                 List<RawPosture> list = entry.getValue();
 
-                // monitor_coord 평균
+                long validCount = list.stream()
+                        .map(r -> {
+                            @SuppressWarnings("unchecked")
+                            var pd = (Map<String, Map<String, Number>>) r.getUserCoord().get("pose_data");
+                            var joints = Map.of(
+                                    "nose",      toArr(pd.get("nose")),
+                                    "le_ear",    toArr(pd.get("le_ear")),
+                                    "re_ear",    toArr(pd.get("re_ear")),
+                                    "le_shoulder", toArr(pd.get("le_shoulder")),
+                                    "re_shoulder", toArr(pd.get("re_shoulder")),
+                                    "le_hip",    toArr(pd.get("le_hip")),
+                                    "re_hip",    toArr(pd.get("re_hip"))
+                            );
+                            return PostureAnalysisUtil.analyze(joints).isValidPosture();
+                        })
+                        .filter(Boolean::booleanValue)
+                        .count();
+
+                boolean valid = validCount >= Math.ceil(VALID_RATIO * list.size());
+
                 double avgX = list.stream()
                         .mapToDouble(r -> ((Number) r.getMonitorCoord().get("x")).doubleValue())
                         .average().orElse(0.0);
@@ -79,72 +98,28 @@ public class PostureBatchJobConfig {
                         .mapToDouble(r -> ((Number) r.getMonitorCoord().get("z")).doubleValue())
                         .average().orElse(0.0);
 
-                // user_coord 평균 (le_pupil, re_pupil + pose_data...)
-                List<String> keys = List.of(
-                        "le_pupil","re_pupil",
-                        "nose","le_ear","re_ear","le_shoulder","re_shoulder",
-                        "le_elbow","re_elbow","le_wrist","re_wrist",
-                        "le_hip","re_hip","le_knee","re_knee","le_ankle","re_ankle"
-                );
-                Map<String,double[]> sums = new LinkedHashMap<>();
-                keys.forEach(k -> sums.put(k, new double[3]));
-
-                for (RawPosture r : list) {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> user = r.getUserCoord();
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> pd = (Map<String, Object>) user.get("pose_data");
-
-                    // pupils
-                    for (String k : List.of("le_pupil","re_pupil")) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Number> p = (Map<String, Number>) user.get(k);
-                        double[] arr = sums.get(k);
-                        arr[0] += p.get("x").doubleValue();
-                        arr[1] += p.get("y").doubleValue();
-                        arr[2] += p.get("z").doubleValue();
-                    }
-                    // pose_data
-                    for (String k : keys.subList(2, keys.size())) {
-                        @SuppressWarnings("unchecked")
-                        Map<String, Number> p = (Map<String, Number>) pd.get(k);
-                        double[] arr = sums.get(k);
-                        arr[0] += p.get("x").doubleValue();
-                        arr[1] += p.get("y").doubleValue();
-                        arr[2] += p.get("z").doubleValue();
-                    }
-                }
-
-                Map<String,Object> userAvg = new LinkedHashMap<>();
-                for (String k : keys) {
-                    double[] s = sums.get(k);
-                    userAvg.put(k, Map.of(
-                            "x", s[0] / list.size(),
-                            "y", s[1] / list.size(),
-                            "z", s[2] / list.size()
-                    ));
-                }
-
-                // PostureStats 엔티티 생성
                 PostureStats stats = PostureStats.builder()
                         .profileId(pid)
                         .monitorCoord(Map.of("avgx", avgX, "avgy", avgY, "avgz", avgZ))
-                        .userCoord(Map.of(
-                                "le_pupil", userAvg.get("le_pupil"),
-                                "re_pupil", userAvg.get("re_pupil"),
-                                "pose_data", keys.subList(2, keys.size())
-                                        .stream().collect(Collectors.toMap(k -> k, userAvg::get, (a,b) -> b, LinkedHashMap::new))
-                        ))
+                        .userCoord(Map.of("pose_data", Map.of()))
                         .startAt(start)
                         .endAt(end)
                         .durationSeconds((int) Duration.between(start, end).getSeconds())
                         .slotIndex(start.getMinute())
+                        .validPosture(valid)
                         .build();
 
                 statsRepo.save(stats);
             }
-
             return RepeatStatus.FINISHED;
+        };
+    }
+
+    private static double[] toArr(Map<String, Number> c) {
+        return new double[]{
+                c.get("x").doubleValue(),
+                c.get("y").doubleValue(),
+                c.get("z").doubleValue()
         };
     }
 
@@ -152,8 +127,8 @@ public class PostureBatchJobConfig {
     public Step cleanupStep() {
         return new StepBuilder("cleanupStep", jobRepository)
                 .tasklet((contrib, ctx) -> {
-                    LocalDateTime end = LocalDateTime.now();
-                    rawRepo.deleteAll(rawRepo.findByCollectedAtLessThanEqual(end));
+                    LocalDateTime now = LocalDateTime.now();
+                    rawRepo.deleteAll(rawRepo.findByCollectedAtLessThanEqual(now));
                     return RepeatStatus.FINISHED;
                 }, tx)
                 .build();
