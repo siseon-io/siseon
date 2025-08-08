@@ -13,7 +13,7 @@ using json = nlohmann::json;
 class EyePosNode : public rclcpp::Node {
 public:
   EyePosNode()
-  : Node("eye_pos_node"),
+  : Node("eye_pose_node"),
     socket_(io_context_,
             asio::ip::udp::endpoint(asio::ip::udp::v4(), 30080))
   {
@@ -32,12 +32,12 @@ public:
     // 1) ROS2 퍼블리셔 생성
     pub_ = this->create_publisher<std_msgs::msg::String>("eye_pose", 10);
 
-    // 2) lidar_dist 토픽 구독자 생성
+    // 3) Subscriber for the lidar_dist topic
     person_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
       "lidar_dist", 10,
       std::bind(&EyePosNode::personCallback, this, std::placeholders::_1)
     );
-    // 3) UDP 수신 시작
+    // 4) Start UDP receive
     start_receive();
 
     // 4) 10초마다 HTTP 전송 타이머
@@ -59,7 +59,7 @@ public:
   }
 
 private:
-  // lidar_dist 콜백
+  // Callback for lidar_dist
   void personCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
     latest_person_ = *msg;
     has_person_ = true;
@@ -88,7 +88,7 @@ private:
       auto pose_xy = j.at("pose_xy");
       float y = 1.0f;  // 기본값
       if (has_person_) {
-        y = std::abs(latest_person_.point.y)*100;
+        y = std::abs(latest_person_.point.y) * 100;
       }
 
       
@@ -120,13 +120,14 @@ private:
       auto fusion_s = out_to_fusion_node.dump();
       RCLCPP_INFO(get_logger(), "Fused JSON: %s", fusion_s.c_str());
 
-      // ROS2 토픽으로 퍼블리시
+      // Publish the message to the ROS2 topic
       std_msgs::msg::String msg;
       msg.data = fusion_s;
       pub_->publish(msg);
 
       
     } catch (const std::exception &e) {
+      // 에러 로그는 항상 출력
       RCLCPP_ERROR(get_logger(), "JSON parse error: %s", e.what());
     }
   }
@@ -171,11 +172,14 @@ private:
   }
   // 멤버 변수
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-  rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr person_sub_;  // 추가
+  rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr person_sub_;
   geometry_msgs::msg::PointStamped latest_person_;
   bool has_person_{false};
+  
+  // 2. 디버그 플래그 멤버 변수
+  bool debug_;
 
-  // 통신 설정
+  // Communication settings
   asio::io_context io_context_;
   asio::ip::udp::socket socket_;
   asio::ip::udp::endpoint remote_ep_;

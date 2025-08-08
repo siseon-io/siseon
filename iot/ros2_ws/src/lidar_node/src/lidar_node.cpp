@@ -20,7 +20,7 @@ public:
     pub_ = this->create_publisher<geometry_msgs::msg::PointStamped>(
         "/lidar_dist", 10);
 
-    RCLCPP_INFO(this->get_logger(), "PersonDetector node started (C++ LiDAR only)");
+    // RCLCPP_INFO(this->get_logger(), "PersonDetector node started (C++ LiDAR only)");
   }
 
 private:

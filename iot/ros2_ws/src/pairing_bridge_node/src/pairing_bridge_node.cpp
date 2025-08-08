@@ -20,7 +20,6 @@ static constexpr int QOS = 1;
 using namespace std::chrono_literals;
 using json = nlohmann::json;
 
-// ── PairingBridgeNode 클래스 ─────────────────────────────────────────────────
 class PairingBridgeNode
     : public rclcpp::Node
     , public virtual mqtt::callback
@@ -29,59 +28,50 @@ public:
     PairingBridgeNode()
     : Node("pairing_bridge_node")
     {
-        // ROS2 퍼블리셔
-        pub_ = create_publisher<std_msgs::msg::String>("/mac_addr", 10);
+        this->declare_parameter<bool>("debug", false);
+        this->get_parameter("debug", debug_);
 
-        // D-Bus 시스템 버스 연결 및 이벤트 루프 시작
+        pub_ = create_publisher<std_msgs::msg::String>("/mac_addr", 10);
         conn_ = sdbus::createSystemBusConnection();
         conn_->enterEventLoopAsync();
         adapterPath_ = "/org/bluez/hci0";
-
         registerAgent();
-
         loadEnvironment();
         initMqtt();
-
-        // 주기적으로 연결된 디바이스를 탐색
         timer_ = create_wall_timer(1s, [this]() { pollConnections(); });
     }
 
     ~PairingBridgeNode() override
     {
         try { client_->disconnect()->wait(); } catch(...) {}
-
         unregisterAdvertisement();
-
         conn_->leaveEventLoop();
     }
 
-    // mqtt::callback 구현
     void connection_lost(const std::string &cause) override {
-        RCLCPP_WARN(get_logger(), "MQTT 연결 상실: %s", cause.empty() ? "Unknown" : cause.c_str());
+        if (debug_) RCLCPP_WARN(get_logger(), "MQTT 연결 상실: %s", cause.empty() ? "Unknown" : cause.c_str());
     }
 
     void message_arrived(mqtt::const_message_ptr msg) override {
         auto topic   = msg->get_topic();
         auto payload = msg->to_string();
-        RCLCPP_INFO(get_logger(), "MQTT 수신: topic=%s payload=%s", topic.c_str(), payload.c_str());
+        if (debug_) RCLCPP_INFO(get_logger(), "MQTT 수신: topic=%s payload=%s", topic.c_str(), payload.c_str());
 
-        // 페어링 요청이 오면 BLE 광고 시작
         if (topic == topicRequest_ && !pairingRequested_) {
             try {
-                // JSON 파싱 시도
                 json j = json::parse(payload);
                 if (j.contains("profile_id")) {
                     std::string profileId = j["profile_id"];
-                    RCLCPP_INFO(get_logger(), "📋 Profile ID 수신: %s", profileId.c_str());
+                    if (debug_) RCLCPP_INFO(get_logger(), "📋 Profile ID 수신: %s", profileId.c_str());
                     currentProfileId_ = profileId;
                 } else {
-                    RCLCPP_WARN(get_logger(), "⚠️ JSON에 profile_id 필드가 없습니다");
+                    if (debug_) RCLCPP_WARN(get_logger(), "⚠️ JSON에 profile_id 필드가 없습니다");
                 }
             } catch (const json::exception& e) {
-                RCLCPP_WARN(get_logger(), "⚠️ JSON 파싱 실패, 일반 페어링 요청으로 처리: %s", e.what());
+                if (debug_) RCLCPP_WARN(get_logger(), "⚠️ JSON 파싱 실패, 일반 페어링 요청으로 처리: %s", e.what());
             }
             
-            RCLCPP_INFO(get_logger(), "🛎 페어링 요청 수신 → BLE 광고 시작");
+            if (debug_) RCLCPP_INFO(get_logger(), "🛎 페어링 요청 수신 → BLE 광고 시작");
             pairingRequested_ = true;
             seen_.clear();
 
@@ -96,9 +86,9 @@ public:
         }
     }
 
-
 private:
-    // Just-Works 에이전트 등록
+    bool debug_;
+
     void registerAgent() {
         auto agent = sdbus::createObject(*conn_, "/pairing_agent");
         agent->registerMethod("Release").onInterface("org.bluez.Agent1").implementedAs([](){});
@@ -108,31 +98,22 @@ private:
         auto mgr = sdbus::createProxy(*conn_, "org.bluez", "/org/bluez");
         mgr->callMethod("RegisterAgent")
            .onInterface("org.bluez.AgentManager1")
-           .withArguments(sdbus::ObjectPath("/pairing_agent"),
-                          std::string("NoInputNoOutput"));
+           .withArguments(sdbus::ObjectPath("/pairing_agent"), std::string("NoInputNoOutput"));
         mgr->callMethod("RequestDefaultAgent")
            .onInterface("org.bluez.AgentManager1")
            .withArguments(sdbus::ObjectPath("/pairing_agent"));
 
-        RCLCPP_INFO(get_logger(), "Just-Works 에이전트 등록 완료");
+        if (debug_) RCLCPP_INFO(get_logger(), "Just-Works 에이전트 등록 완료");
     }
 
-    // 어댑터 Discoverable/Pairable 모드로 설정
     void makeAdapterDiscoverable() {
         auto adapter = sdbus::createProxy(*conn_, "org.bluez", adapterPath_);
-        adapter->callMethod("Set")
-               .onInterface("org.freedesktop.DBus.Properties")
-               .withArguments("org.bluez.Adapter1", "Powered",      sdbus::Variant(true));
-        adapter->callMethod("Set")
-               .onInterface("org.freedesktop.DBus.Properties")
-               .withArguments("org.bluez.Adapter1", "Discoverable", sdbus::Variant(true));
-        adapter->callMethod("Set")
-               .onInterface("org.freedesktop.DBus.Properties")
-               .withArguments("org.bluez.Adapter1", "Pairable",     sdbus::Variant(true));
-        RCLCPP_INFO(get_logger(), "🔵 어댑터 Powered/Discoverable/Pairable 설정 완료");
+        adapter->callMethod("Set").onInterface("org.freedesktop.DBus.Properties").withArguments("org.bluez.Adapter1", "Powered", sdbus::Variant(true));
+        adapter->callMethod("Set").onInterface("org.freedesktop.DBus.Properties").withArguments("org.bluez.Adapter1", "Discoverable", sdbus::Variant(true));
+        adapter->callMethod("Set").onInterface("org.freedesktop.DBus.Properties").withArguments("org.bluez.Adapter1", "Pairable", sdbus::Variant(true));
+        if (debug_) RCLCPP_INFO(get_logger(), "🔵 어댑터 Powered/Discoverable/Pairable 설정 완료");
     }
 
-    // 환경변수 조회 헬퍼
     template<typename T>
     void getEnv(const char* key, T &out, bool required, T def = T{}) {
         if (auto v = std::getenv(key)) {
@@ -146,7 +127,6 @@ private:
         }
     }
 
-    // MQTT 설정 정보 로드
     void loadEnvironment() {
         getEnv("MQTT_HOST",       mqttHost_,   true);
         getEnv("MQTT_PORT",       mqttPort_,   true);
@@ -159,12 +139,9 @@ private:
         topicRequest_ = "/request_pair/" + deviceId_;
     }
 
-    // MQTT 초기화 및 구독
     void initMqtt() {
-        std::string address =
-            (proto_ == "mqtt" || proto_ == "tcp" ? "tcp://" : "ssl://") +
-            mqttHost_ + ":" + std::to_string(mqttPort_);
-        RCLCPP_INFO(get_logger(), "🔗 MQTT broker: %s", address.c_str());
+        std::string address = (proto_ == "mqtt" || proto_ == "tcp" ? "tcp://" : "ssl://") + mqttHost_ + ":" + std::to_string(mqttPort_);
+        if (debug_) RCLCPP_INFO(get_logger(), "🔗 MQTT broker: %s", address.c_str());
 
         client_ = std::make_unique<mqtt::async_client>(address, "pairing_bridge_node");
         client_->set_callback(*this);
@@ -172,10 +149,10 @@ private:
         auto sslb = mqtt::ssl_options_builder();
         if (!sslCaPath_.empty()) {
             sslb.trust_store(sslCaPath_).enable_server_cert_auth(true);
-            RCLCPP_INFO(get_logger(), "🔒 CA cert: %s", sslCaPath_.c_str());
+            if (debug_) RCLCPP_INFO(get_logger(), "🔒 CA cert: %s", sslCaPath_.c_str());
         } else {
             sslb.enable_server_cert_auth(false);
-            RCLCPP_WARN(get_logger(), "⚠️ MQTT_CA_CERT 미설정: 서버 인증서 검증 OFF");
+            if (debug_) RCLCPP_WARN(get_logger(), "⚠️ MQTT_CA_CERT 미설정: 서버 인증서 검증 OFF");
         }
         sslOpts_ = sslb.finalize();
 
@@ -189,72 +166,57 @@ private:
                         .finalize();
 
         try {
-            RCLCPP_INFO(get_logger(), "🔄 MQTT 연결 시도…");
+            if (debug_) RCLCPP_INFO(get_logger(), "🔄 MQTT 연결 시도…");
             client_->connect(connOpts_)->wait();
-            RCLCPP_INFO(get_logger(), "✅ MQTT 연결 성공");
+            if (debug_) RCLCPP_INFO(get_logger(), "✅ MQTT 연결 성공");
             client_->subscribe(topicRequest_, QOS)->wait();
-            RCLCPP_INFO(get_logger(), "📡 구독: %s", topicRequest_.c_str());
+            if (debug_) RCLCPP_INFO(get_logger(), "📡 구독: %s", topicRequest_.c_str());
         } catch (const mqtt::exception &e) {
             RCLCPP_ERROR(get_logger(), "❌ MQTT 연결/구독 실패: %s", e.what());
             throw;
         }
     }
 
-    // BLE 광고 등록
     void registerAdvertisement() {
         if (advObj_) return;
 
         advObj_ = sdbus::createObject(*conn_, "/pairing_advertisement");
         advObj_->registerMethod("Release")
                 .onInterface("org.bluez.LEAdvertisement1")
-                .implementedAs([](){
-                    RCLCPP_INFO(rclcpp::get_logger("pairing_bridge_node"), "Advertisement Release()");
+                .implementedAs([this](){ // capture this
+                    if (this->debug_) RCLCPP_INFO(rclcpp::get_logger("pairing_bridge_node"), "Advertisement Release()");
                 });
-        advObj_->registerProperty("Type")
-                .onInterface("org.bluez.LEAdvertisement1")
-                .withGetter([](){ return std::string("peripheral"); });
-        advObj_->registerProperty("LocalName")
-                .onInterface("org.bluez.LEAdvertisement1")
-                .withGetter([](){ return std::string("pi5"); });
-        advObj_->registerProperty("ServiceUUIDs")
-                .onInterface("org.bluez.LEAdvertisement1")
-                .withGetter([](){ return std::vector<std::string>{
-                    "12345678-1234-5678-1234-56789ABCDEF0"
-                }; });
-        advObj_->registerProperty("IncludeTxPower")
-                .onInterface("org.bluez.LEAdvertisement1")
-                .withGetter([](){ return true; });
+        advObj_->registerProperty("Type").onInterface("org.bluez.LEAdvertisement1").withGetter([](){ return std::string("peripheral"); });
+        advObj_->registerProperty("LocalName").onInterface("org.bluez.LEAdvertisement1").withGetter([](){ return std::string("pi5"); });
+        advObj_->registerProperty("ServiceUUIDs").onInterface("org.bluez.LEAdvertisement1").withGetter([](){ return std::vector<std::string>{"12345678-1234-5678-1234-56789ABCDEF0"}; });
+        advObj_->registerProperty("IncludeTxPower").onInterface("org.bluez.LEAdvertisement1").withGetter([](){ return true; });
         advObj_->finishRegistration();
 
         try {
             auto mgr = sdbus::createProxy(*conn_, "org.bluez", adapterPath_);
             mgr->callMethod("RegisterAdvertisement")
                .onInterface("org.bluez.LEAdvertisingManager1")
-               .withArguments(sdbus::ObjectPath("/pairing_advertisement"),
-                              std::map<std::string,sdbus::Variant>{});
-            RCLCPP_INFO(get_logger(), "📡 BLE Advertising 등록 완료");
+               .withArguments(sdbus::ObjectPath("/pairing_advertisement"), std::map<std::string,sdbus::Variant>{});
+            if (debug_) RCLCPP_INFO(get_logger(), "📡 BLE Advertising 등록 완료");
         } catch (const sdbus::Error &e) {
-            RCLCPP_WARN(get_logger(), "⚠️ 광고 등록 실패: %s", e.what());
+            if (debug_) RCLCPP_WARN(get_logger(), "⚠️ 광고 등록 실패: %s", e.what());
         }
     }
 
-    // BLE 광고 해제
     void unregisterAdvertisement() {
         if (!advObj_) return;
-
         try {
             auto mgr = sdbus::createProxy(*conn_, "org.bluez", adapterPath_);
             mgr->callMethod("UnregisterAdvertisement")
                .onInterface("org.bluez.LEAdvertisingManager1")
                .withArguments(sdbus::ObjectPath("/pairing_advertisement"));
             advObj_.reset();
-            RCLCPP_INFO(get_logger(), "🚫 BLE Advertising 해제 완료");
+            if (debug_) RCLCPP_INFO(get_logger(), "🚫 BLE Advertising 해제 완료");
         } catch (const sdbus::Error &e) {
-            RCLCPP_WARN(get_logger(), "⚠️ 광고 해제 실패: %s", e.what());
+            if (debug_) RCLCPP_WARN(get_logger(), "⚠️ 광고 해제 실패: %s", e.what());
         }
     }
 
-    // 연결된 디바이스 검사 및 페어링/연결
     void pollConnections() {
         if (!pairingRequested_) return;
 
@@ -280,21 +242,21 @@ private:
             auto dev = sdbus::createProxy(*conn_, "org.bluez", path);
             try {
                 dev->callMethod("Pair").onInterface("org.bluez.Device1");
-                RCLCPP_INFO(get_logger(), "Pair() 성공: %s", mac.c_str());
+                if (debug_) RCLCPP_INFO(get_logger(), "Pair() 성공: %s", mac.c_str());
             } catch (const sdbus::Error &e) {
-                RCLCPP_WARN(get_logger(), "Pair() 실패(%s)", e.what());
+                if (debug_) RCLCPP_WARN(get_logger(), "Pair() 실패(%s)", e.what());
             }
             try {
                 dev->callMethod("Connect").onInterface("org.bluez.Device1");
-                RCLCPP_INFO(get_logger(), "Connect() 성공: %s", mac.c_str());
+                if (debug_) RCLCPP_INFO(get_logger(), "Connect() 성공: %s", mac.c_str());
             } catch (const sdbus::Error &e) {
-                RCLCPP_WARN(get_logger(), "Connect() 실패(%s)", e.what());
+                if (debug_) RCLCPP_WARN(get_logger(), "Connect() 실패(%s)", e.what());
             }
 
             std_msgs::msg::String msg;
             msg.data = mac;
             pub_->publish(msg);
-            RCLCPP_INFO(get_logger(), "MAC 주소 Published: %s", msg.data.c_str());
+            if (debug_) RCLCPP_INFO(get_logger(), "MAC 주소 Published: %s", msg.data.c_str());
 
             break;
         }
@@ -302,20 +264,16 @@ private:
         pclose(pipe);
     }
 
-private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
     rclcpp::TimerBase::SharedPtr timer_, advertiseTimer_;
     bool pairingRequested_{false};
     std::set<std::string> seen_;
-
     std::unique_ptr<sdbus::IConnection>   conn_;
     std::unique_ptr<sdbus::IObject>       advObj_;
     std::string                           adapterPath_;
-
     std::unique_ptr<mqtt::async_client>   client_;
     mqtt::connect_options                 connOpts_;
     mqtt::ssl_options                     sslOpts_;
-
     std::string mqttHost_, mqttUser_, mqttPasswd_, sslCaPath_, proto_;
     std::string deviceId_, topicRequest_;
     std::string currentProfileId_;

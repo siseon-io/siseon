@@ -155,11 +155,11 @@ public:
             // registerAgent(); // 필요 시 주석 해제
             registerGattApplication();
         } catch (const sdbus::Error& e) {
-            RCLCPP_ERROR(this->get_logger(), "D-Bus 연결 실패: %s", e.what());
+            // RCLCPP_ERROR(this->get_logger(), "D-Bus 연결 실패: %s", e.what());
             return;
         }
         
-        RCLCPP_INFO(this->get_logger(), "✅ Manual BT Node (GATT 서버) 시작됨. /mac_addr 토픽을 기다립니다...");
+        // RCLCPP_INFO(this->get_logger(), "✅ Manual BT Node (GATT 서버) 시작됨. /mac_addr 토픽을 기다립니다...");
     }
 
     ~ManualBTNode()
@@ -186,7 +186,7 @@ public:
     void publishPose(const std::vector<uint8_t>& data) {
         // 데이터 포맷: x(float, 4바이트), y(float, 4바이트), z(float, 4바이트) = 총 12바이트
         if (data.size() < 3) {
-            RCLCPP_WARN(this->get_logger(), "수신 데이터가 너무 짧습니다 (12바이트 필요). Size: %zu", data.size());
+            // RCLCPP_WARN(this->get_logger(), "수신 데이터가 너무 짧습니다 (12바이트 필요). Size: %zu", data.size());
             return;
         }
 
@@ -200,8 +200,8 @@ public:
         // /manual_pose 토픽으로 발행
         pose_pub_->publish(point_msg);
 
-        RCLCPP_INFO(this->get_logger(), "GATT 데이터 수신 및 발행: [x: %.3f, y: %.3f, z: %.3f]",
-                    point_msg.x, point_msg.y, point_msg.z);
+        // RCLCPP_INFO(this->get_logger(), "GATT 데이터 수신 및 발행: [x: %.3f, y: %.3f, z: %.3f]",
+        //             point_msg.x, point_msg.y, point_msg.z);
     }
 
 private:
@@ -210,7 +210,7 @@ private:
     {
         std::string new_mac = msg->data;
         if (target_mac_ != new_mac) {
-            RCLCPP_INFO(this->get_logger(), "새로운 타겟 MAC 주소 수신: %s", new_mac.c_str());
+            // RCLCPP_INFO(this->get_logger(), "새로운 타겟 MAC 주소 수신: %s", new_mac.c_str());
             target_mac_ = new_mac;
         }
     }
@@ -226,9 +226,9 @@ private:
                .onInterface("org.bluez.GattManager1")
                .withArguments(sdbus::ObjectPath("/org/example/application"),
                               std::map<std::string, sdbus::Variant>{});
-            RCLCPP_INFO(get_logger(), "✅ GATT Application 등록 완료");
+            // RCLCPP_INFO(get_logger(), "✅ GATT Application 등록 완료");
         } catch (const sdbus::Error& e) {
-            RCLCPP_ERROR(get_logger(), "GATT Application 등록 실패: %s", e.what());
+            // RCLCPP_ERROR(get_logger(), "GATT Application 등록 실패: %s", e.what());
         }
     }
 
@@ -255,9 +255,9 @@ std::vector<uint8_t> GattCharacteristic::ReadValue(
     for (auto b : characteristic_value_) {
         oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b) << ' ';
     }
-    RCLCPP_INFO(rclcpp::get_logger("gatt_server"),
-                "ReadValue 호출, 반환 데이터: [%s]",
-                oss.str().c_str());
+    // RCLCPP_INFO(rclcpp::get_logger("gatt_server"),
+    //             "ReadValue 호출, 반환 데이터: [%s]",
+    //             oss.str().c_str());
 
     return characteristic_value_;
 }
@@ -272,9 +272,9 @@ void GattCharacteristic::WriteValue(
     for (auto b : value) {
         oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b) << ' ';
     }
-    RCLCPP_INFO(rclcpp::get_logger("gatt_server"),
-                "WriteValue 호출, 수신 데이터: [%s]",
-                oss.str().c_str());
+    // RCLCPP_INFO(rclcpp::get_logger("gatt_server"),
+    //             "WriteValue 호출, 수신 데이터: [%s]",
+    //             oss.str().c_str());
 
     // 내부 값 갱신
     characteristic_value_ = value;

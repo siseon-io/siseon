@@ -10,7 +10,7 @@
 #include <cmath>
 
 // --- 다이나믹셀 설정 ---
-#define PORT_NAME           "/dev/ttyUSB0"
+#define PORT_NAME           "/dev/ttyUSB1"
 #define BAUDRATE            1000000
 #define PROTOCOL_VERSION    2.0
 
