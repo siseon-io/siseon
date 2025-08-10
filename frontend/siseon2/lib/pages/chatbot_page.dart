@@ -1,40 +1,125 @@
+// lib/pages/chat/chatbot_page.dart
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+
+import 'package:siseon2/services/chat_api.dart';
+import 'package:siseon2/models/chat_models.dart';
+import 'package:flutter/services.dart';
+import 'package:siseon2/services/auth_service.dart';
+import 'package:siseon2/services/profile_cache_service.dart';
 
 class ChatbotPage extends StatefulWidget {
-  const ChatbotPage({super.key});
+  final int profileId; // ✅ 프로필 ID 필요
+
+  const ChatbotPage({super.key, required this.profileId});
 
   @override
   State<ChatbotPage> createState() => _ChatbotPageState();
 }
 
 class _ChatbotPageState extends State<ChatbotPage> {
-  final List<_Bubble> _messages = [];
-  final TextEditingController _controller = TextEditingController();
+  // ── THEME ────────────────────────────────────────────────────────────────────
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color rootBackground = Color(0xFF161B22);
+  static const Color bubbleBg = Color(0xFF1F2937);
+  static const Color inputBg = Color(0xFF111827);
 
-  Future<String> sendMessageToBot(String userText) async {
-    // TODO: 여기서 실제 백엔드 API 연동
-    await Future.delayed(const Duration(milliseconds: 300));
-    return "준비 중이에요. 곧 백엔드랑 연결할게요! 😄";
+  // ── STATE ────────────────────────────────────────────────────────────────────
+  final List<ChatMessage> _messages = [];
+  final TextEditingController _controller = TextEditingController();
+  final ScrollController _scroll = ScrollController();
+  final _timeFmt = DateFormat('HH:mm');
+
+  final ChatApi _api = ChatApi();
+  bool _loading = true;
+  bool _sending = false;
+
+  // ── LIFECYCLE ────────────────────────────────────────────────────────────────
+  @override
+  void initState() {
+    super.initState();
+    _loadHistory();
   }
 
-  void _onSend() async {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
+  Future<void> _loadHistory() async {
+    try {
+      final hist = await _api.fetchHistory(profileId: widget.profileId);
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(hist);
+        _loading = false;
+      });
+      _jumpToNewest(); // reverse=true에서 0으로 스크롤이 최신
+    } catch (e) {
+      setState(() => _loading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('이전 대화 불러오기 실패: $e')),
+        );
+      }
+    }
+  }
 
+  // ── SEND ─────────────────────────────────────────────────────────────────────
+  Future<void> _onSend() async {
+    final text = _controller.text.trim();
+    if (text.isEmpty || _sending) return;
+
+    final now = DateTime.now();
     setState(() {
-      _messages.add(_Bubble(text: text, isUser: true));
+      _messages.add(ChatMessage(role: 'user', content: text, createdAt: now));
+      _sending = true;
     });
     _controller.clear();
+    _jumpToNewest();
 
-    final reply = await sendMessageToBot(text);
-    if (!mounted) return;
-    setState(() {
-      _messages.add(_Bubble(text: reply, isUser: false));
+    try {
+      final res = await _api.sendQuestion(
+        profileId: widget.profileId,
+        question: text,
+      );
+      final assistantText = _composeAssistantText(res.summary, res.details);
+
+      setState(() {
+        _messages.add(ChatMessage(
+          role: 'assistant',
+          content: assistantText,
+          createdAt: res.createdAt,
+        ));
+      });
+      _jumpToNewest();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('전송 실패: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+  }
+
+  String _composeAssistantText(String summary, Map<String, dynamic> details) {
+    if (details.isEmpty) return summary;
+    final tail = details.toString(); // 필요하면 예쁘게 렌더링하도록 후속 개선
+    return summary.isEmpty ? tail : '$summary\n\n$tail';
+  }
+
+  void _jumpToNewest() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) {
+        // reverse: true 이므로 0이 최신쪽
+        _scroll.animateTo(
+          0,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
+  // ── UI ───────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -43,34 +128,68 @@ class _ChatbotPageState extends State<ChatbotPage> {
         backgroundColor: rootBackground,
         elevation: 0,
         title: const Text('챗봇', style: TextStyle(color: Colors.white)),
-        centerTitle: false,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.bug_report, color: Colors.white),
+            onPressed: () async {
+              final token = await AuthService.getValidAccessToken();
+              final prof = await ProfileCacheService.loadProfile();
+              final pid = prof?['profileId'] ?? prof?['id'];
+              await Clipboard.setData(ClipboardData(text: token ?? ''));
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('토큰 복사됨, profileId=$pid')),
+              );
+              debugPrint('[DEBUG] token=${token?.substring(0,20)}...  pid=$pid');
+            },
+            tooltip: '토큰 복사',
+          ),
+        ],
       ),
       body: Column(
         children: [
+          if (_loading)
+            const LinearProgressIndicator(minHeight: 2),
           Expanded(
             child: ListView.builder(
+              controller: _scroll,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               itemCount: _messages.length,
-              reverse: true,
+              reverse: true, // ✅ 최신이 아래쪽처럼 보이게
               itemBuilder: (context, index) {
-                final msg = _messages[_messages.length - 1 - index];
+                final m = _messages[_messages.length - 1 - index];
+                final isUser = m.role == 'user';
+                final timeStr = _timeFmt.format(m.createdAt);
+
                 return Align(
-                  alignment:
-                  msg.isUser ? Alignment.centerRight : Alignment.centerLeft,
+                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
                     margin: const EdgeInsets.symmetric(vertical: 6),
-                    padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     constraints: BoxConstraints(
                       maxWidth: MediaQuery.of(context).size.width * 0.75,
                     ),
                     decoration: BoxDecoration(
-                      color: msg.isUser ? primaryBlue : const Color(0xFF1F2937),
+                      color: isUser ? primaryBlue : bubbleBg,
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    child: Text(
-                      msg.text,
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                    child: Column(
+                      crossAxisAlignment:
+                      isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          m.content,
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          timeStr,
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.8),
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 );
@@ -90,9 +209,8 @@ class _ChatbotPageState extends State<ChatbotPage> {
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
                         hintText: '메시지를 입력하세요…',
-                        hintStyle:
-                        TextStyle(color: Colors.white.withOpacity(0.5)),
-                        fillColor: const Color(0xFF111827),
+                        hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+                        fillColor: inputBg,
                         filled: true,
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 14, vertical: 12),
@@ -106,7 +224,7 @@ class _ChatbotPageState extends State<ChatbotPage> {
                   ),
                   const SizedBox(width: 8),
                   IconButton(
-                    onPressed: _onSend,
+                    onPressed: _sending ? null : _onSend,
                     icon: const Icon(Icons.send_rounded, color: Colors.white),
                   ),
                 ],
@@ -117,10 +235,4 @@ class _ChatbotPageState extends State<ChatbotPage> {
       ),
     );
   }
-}
-
-class _Bubble {
-  final String text;
-  final bool isUser;
-  _Bubble({required this.text, required this.isUser});
 }

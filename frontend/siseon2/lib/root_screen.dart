@@ -1,3 +1,4 @@
+// lib/root_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -5,8 +6,10 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'pages/home_screen.dart';
 import 'pages/manual_page.dart';
 import 'pages/chatbot_page.dart';
-import 'pages/settings/settings_page.dart'; // ✅ SettingsPage 클래스 사용
+import 'pages/settings/settings_page.dart';
+
 import 'package:siseon2/models/control_mode.dart';
+import 'package:siseon2/services/profile_cache_service.dart';
 
 class RootScreen extends StatefulWidget {
   const RootScreen({super.key});
@@ -24,9 +27,37 @@ class _RootScreenState extends State<RootScreen> {
   // 루트에서 보유하는 현재 모드(홈과 동기화)
   ControlMode _currentMode = ControlMode.auto;
 
+  // ✅ 선택된 프로필 ID (SharedPreferences에서 로드)
+  int? _profileId;
+
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color rootBackground = Color(0xFF161B22);
   static const Color inactiveGrey = Colors.grey;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfileId(); // 앱 시작 시 한 번 로드
+  }
+
+  /// ✅ 프로필 ID 로드: loadProfile()에서 profileId 또는 id를 읽어 정수로 변환
+  Future<void> _loadProfileId() async {
+    try {
+      final p = await ProfileCacheService.loadProfile();
+      final raw = p == null ? null : (p['profileId'] ?? p['id']);
+      setState(() {
+        if (raw is int) {
+          _profileId = raw;
+        } else if (raw is String) {
+          _profileId = int.tryParse(raw);
+        } else {
+          _profileId = null;
+        }
+      });
+    } catch (_) {
+      setState(() => _profileId = null);
+    }
+  }
 
   /// 설정 탭으로 이동 (HomeScreen의 onGoToProfile 콜백에 연결)
   void _goToSettingsPage() {
@@ -37,7 +68,7 @@ class _RootScreenState extends State<RootScreen> {
 
   /// 홈/FAB에서 AI 모드 전환 요청
   void _handleAiModeFromHome() {
-    _homeKey.currentState?.setModeExternal(ControlMode.auto); // Home 쪽 단일 진입점
+    _homeKey.currentState?.setModeExternal(ControlMode.auto);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('🤖 AI 모드로 전환됩니다.'),
@@ -48,14 +79,17 @@ class _RootScreenState extends State<RootScreen> {
 
   /// 탭 전환
   Future<void> _selectTab(int idx) async {
-    // 챗봇/설정은 세로 고정
     if (idx == 1 || idx == 2) {
       await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    }
+    // ✅ 챗봇 탭 진입 시 최신 프로필 다시 로드 (설정에서 바꿨을 수 있음)
+    if (idx == 1) {
+      await _loadProfileId();
     }
     setState(() => _currentIndex = idx);
   }
 
-  /// 수동 진입: 먼저 Home 상태 manual로 전환(발행 포함) → 안내 → 가로 회전 → ManualPage
+  /// 수동 진입: BLE 연결 검사 후 가이드 및 전환
   Future<void> _handleManualTap() async {
     if (_writableChar == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -68,7 +102,6 @@ class _RootScreenState extends State<RootScreen> {
     }
 
     _homeKey.currentState?.setModeExternal(ControlMode.manual);
-
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('3초 뒤 매뉴얼 화면으로 전환됩니다.'),
@@ -77,11 +110,9 @@ class _RootScreenState extends State<RootScreen> {
     );
 
     await Future.delayed(const Duration(seconds: 3));
-
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
+    await SystemChrome.setPreferredOrientations(
+      [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight],
+    );
 
     if (!mounted) return;
     await Navigator.push(
@@ -95,35 +126,34 @@ class _RootScreenState extends State<RootScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 하단 안전 영역(inset) 반영
     final bottomInset = MediaQuery.of(context).padding.bottom;
 
     final pages = [
       HomeScreen(
         key: _homeKey,
-        onAiModeSwitch: _handleAiModeFromHome, // 홈 내부에서 호출해도 안전
-        onGoToProfile: _goToSettingsPage,      // ✅ 설정으로 이동
+        onAiModeSwitch: _handleAiModeFromHome,
+        onGoToProfile: _goToSettingsPage,
         onConnect: (char) {
           setState(() {
             _writableChar = char;
           });
         },
-        // ★ 루트↔홈 모드 동기화
         currentMode: _currentMode,
         onModeChange: (mode) {
           setState(() => _currentMode = mode);
         },
       ),
-      const ChatbotPage(),
-      const SettingsPage(), // ✅ 설정 페이지(클래스명 SettingsPage)
+      // ✅ 프로필 없으면 안내, 있으면 챗봇 페이지
+      (_profileId == null)
+          ? _buildNoProfileGate()
+          : ChatbotPage(profileId: _profileId!),
+      const SettingsPage(),
     ];
 
     return Scaffold(
       extendBody: true,
       backgroundColor: rootBackground,
       body: pages[_currentIndex],
-
-      // 가운데 FAB = AI 모드 스위치
       floatingActionButton: Container(
         decoration: BoxDecoration(
           shape: BoxShape.circle,
@@ -144,7 +174,6 @@ class _RootScreenState extends State<RootScreen> {
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-
       bottomNavigationBar: Container(
         height: 85 + bottomInset,
         padding: EdgeInsets.only(bottom: bottomInset),
@@ -157,9 +186,40 @@ class _RootScreenState extends State<RootScreen> {
           children: [
             _buildTabItem(Icons.home, '홈', 0),
             _buildManualTabItem(Icons.menu_book_rounded, '수동'),
-            const SizedBox(width: 60), // FAB 자리
+            const SizedBox(width: 60),
             _buildTabItem(Icons.chat_bubble_rounded, '챗봇', 1),
             _buildTabItem(Icons.settings, '설정', 2),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// ✅ 프로필 없을 때 챗봇 탭에 보여줄 가드 화면
+  Widget _buildNoProfileGate() {
+    return Scaffold(
+      backgroundColor: rootBackground,
+      appBar: AppBar(
+        backgroundColor: rootBackground,
+        elevation: 0,
+        title: const Text('챗봇', style: TextStyle(color: Colors.white)),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.person_outline, color: Colors.white70, size: 56),
+            const SizedBox(height: 12),
+            const Text(
+              '먼저 프로필을 선택/생성해주세요.',
+              style: TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () => _selectTab(2),
+              style: ElevatedButton.styleFrom(backgroundColor: primaryBlue),
+              child: const Text('설정으로 이동'),
+            ),
           ],
         ),
       ),
@@ -195,10 +255,7 @@ class _RootScreenState extends State<RootScreen> {
   }
 
   Widget _buildManualTabItem(IconData icon, String label) {
-    // BLE 연결되면 파랑, 아니면 회색
-    final isActive = _writableChar != null;
-    final color = isActive ? primaryBlue : inactiveGrey;
-
+    const color = inactiveGrey; // 수동 탭은 항상 회색으로 표시
     return GestureDetector(
       onTap: _handleManualTap,
       behavior: HitTestBehavior.opaque,
@@ -211,7 +268,7 @@ class _RootScreenState extends State<RootScreen> {
             const SizedBox(height: 3),
             Text(
               label,
-              style: TextStyle(
+              style: const TextStyle(
                 color: color,
                 fontSize: 12,
                 fontWeight: FontWeight.w400,

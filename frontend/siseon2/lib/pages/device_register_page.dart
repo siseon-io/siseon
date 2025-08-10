@@ -7,6 +7,16 @@ import 'package:siseon2/services/auth_service.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
 import 'package:siseon2/services/device_cache_service.dart';
 
+/// BleScanScreen 과 같은 팔레트
+class AppColors {
+  static const backgroundBlack = Color(0xFF0D1117);
+  static const cardGrey       = Color(0xFF161B22);
+  static const cardBorder     = Color(0xFF334155);
+  static const primaryBlue    = Color(0xFF3B82F6);
+  static const text           = Colors.white;
+  static const textSub        = Colors.white70;
+}
+
 class DeviceRegisterPage extends StatefulWidget {
   const DeviceRegisterPage({super.key});
 
@@ -16,14 +26,15 @@ class DeviceRegisterPage extends StatefulWidget {
 
 class _DeviceRegisterPageState extends State<DeviceRegisterPage> {
   final TextEditingController _serialController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
   bool _isLoading = false;
 
-  static const Color bg = Color(0xFF1E293B);
-  static const Color primary = Colors.redAccent;
-
   Future<void> _registerDevice() async {
+    FocusScope.of(context).unfocus();
+
     final raw = _serialController.text.trim();
     final serial = raw.toUpperCase();
+
     if (serial.isEmpty) {
       _toast('시리얼 넘버를 입력해주세요.');
       return;
@@ -47,7 +58,7 @@ class _DeviceRegisterPageState extends State<DeviceRegisterPage> {
         return;
       }
 
-      // 1) 서버 등록
+      // 서버 등록
       final res = await http.post(
         Uri.parse('http://i13b101.p.ssafy.io:8080/api/device'),
         headers: {
@@ -60,19 +71,15 @@ class _DeviceRegisterPageState extends State<DeviceRegisterPage> {
         }),
       );
 
-      // 2) 결과 처리
       if (res.statusCode == 200 || res.statusCode == 201) {
-        // (중요) 즉시 로컬 캐시에 반영 → 홈으로 돌아가자마자 "등록됨" 표시
+        // 캐시에 즉시 반영
         await DeviceCacheService.saveDeviceForProfile(pid, {'serial': serial});
-
-        // 서버 데이터 형식과 싱크 맞추기(배경 동기화: 실패해도 UX 영향 X)
         unawaited(DeviceCacheService.fetchAndCacheDevice(profileId: pid));
 
         if (!mounted) return;
         Navigator.pop(context, true);
       } else if (res.statusCode == 409) {
-        // 서버가 중복 등록을 409로 주는 경우가 많음
-        _toast('이미 등록된 시리얼입니다.\n(${res.statusCode})');
+        _toast('이미 등록된 시리얼입니다. (409)');
       } else {
         _toast('기기 등록 실패: ${res.statusCode}\n${res.body}');
       }
@@ -87,7 +94,9 @@ class _DeviceRegisterPageState extends State<DeviceRegisterPage> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg, style: const TextStyle(color: Colors.white)),
-        backgroundColor: Colors.red,
+        backgroundColor: Colors.black.withOpacity(0.85),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }
@@ -100,49 +109,122 @@ class _DeviceRegisterPageState extends State<DeviceRegisterPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: bg,
-      appBar: AppBar(
-        title: const Text('기기 등록'),
-        backgroundColor: primary,
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              '기기의 시리얼 넘버를 입력해주세요:',
-              style: TextStyle(color: Colors.white, fontSize: 16),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _serialController,
-              style: const TextStyle(color: Colors.white),
-              textCapitalization: TextCapitalization.characters,
-              inputFormatters: [
-                FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9\-]')),
-              ],
-              decoration: InputDecoration(
-                hintText: '예: ABCD1234',
-                hintStyle: const TextStyle(color: Colors.white38),
-                filled: true,
-                fillColor: Colors.black12,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+    final canSubmit = _serialController.text.trim().isNotEmpty && !_isLoading;
+
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
+        backgroundColor: AppColors.backgroundBlack,
+        appBar: AppBar(
+          backgroundColor: AppColors.backgroundBlack,
+          elevation: 0,
+          centerTitle: true,
+          title: const Text(
+            '기기 등록',
+            style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w700),
+          ),
+          iconTheme: const IconThemeData(color: Colors.white),
+          foregroundColor: Colors.white,
+        ),
+        body: SafeArea(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 20),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // 설명 카드
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardGrey,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppColors.cardBorder.withOpacity(0.5)),
+                    ),
+                    child: const Text(
+                      '기기의 시리얼 넘버를 입력해주세요.',
+                      style: TextStyle(color: AppColors.text, fontSize: 15),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // 입력 필드 카드
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.cardGrey,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white.withOpacity(0.12)),
+                    ),
+                    child: TextFormField(
+                      controller: _serialController,
+                      onChanged: (_) => setState(() {}),
+                      style: const TextStyle(color: AppColors.text, fontSize: 16),
+                      textCapitalization: TextCapitalization.characters,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9\-]')),
+                      ],
+                      decoration: InputDecoration(
+                        hintText: '예: ABCD1234',
+                        hintStyle: const TextStyle(color: Colors.white38),
+                        isDense: true,
+                        filled: true,
+                        fillColor: const Color(0xFF0F172A), // 살짝 어두운 인풋 배경
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: AppColors.cardBorder.withOpacity(0.5)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: AppColors.primaryBlue, width: 1.2),
+                        ),
+                        suffixIcon: IconButton(
+                          tooltip: '지우기',
+                          icon: const Icon(Icons.clear, color: Colors.white38),
+                          onPressed: () {
+                            _serialController.clear();
+                            setState(() {});
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 22),
+
+                  // 제출 버튼
+                  SizedBox(
+                    height: 48,
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: canSubmit ? _registerDevice : null,
+                      icon: _isLoading
+                          ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                          : const Icon(Icons.verified, color: Colors.white),
+                      label: Text(
+                        _isLoading ? '등록 중...' : '등록 완료',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primaryBlue,
+                        disabledBackgroundColor: AppColors.primaryBlue.withOpacity(0.35),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 24),
-            _isLoading
-                ? const Center(child: CircularProgressIndicator(color: primary))
-                : ElevatedButton(
-              onPressed: _registerDevice,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primary,
-                minimumSize: const Size(double.infinity, 48),
-              ),
-              child: const Text('등록 완료'),
-            ),
-          ],
+          ),
         ),
       ),
     );

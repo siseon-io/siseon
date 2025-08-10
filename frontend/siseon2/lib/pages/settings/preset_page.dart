@@ -32,7 +32,6 @@ class _PresetPageState extends State<PresetPage> {
     _profileId = profile['id'];
     final result = await PresetService.fetchPresets(_profileId!);
     setState(() => _presets = result);
-    print('📥 불러온 프리셋 목록: $_presets');
   }
 
   Future<void> _addPreset() async {
@@ -43,7 +42,6 @@ class _PresetPageState extends State<PresetPage> {
 
     final dummyName = '프리셋 ${_presets.length + 1}';
     final created = await PresetService.createPreset(dummyName, _profileId!, 1);
-
     if (created != null) {
       await _loadProfileAndPresets();
       _showSnackBar('✅ $dummyName이 추가되었습니다');
@@ -52,69 +50,101 @@ class _PresetPageState extends State<PresetPage> {
     }
   }
 
+  // 이름 변경 다이얼로그 (왼쪽=변경, 오른쪽=취소)
   void _renamePreset(int index) async {
     final preset = _presets[index];
-    print('🛠 선택된 프리셋: $preset');
-
     final controller = TextEditingController(text: preset['name']);
 
     final newName = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity(0.6),
+      builder: (ctx) => Dialog(
         backgroundColor: cardGrey,
-        title: const Text('프리셋 이름 변경', style: TextStyle(color: Colors.white)),
-        content: TextField(
-          controller: controller,
-          maxLength: 7, // ✅ 최대 7글자 제한
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            counterStyle: const TextStyle(color: Colors.white54), // 글자 수 표시 스타일
-            labelText: '새 이름 (최대 7글자)',
-            labelStyle: const TextStyle(color: Colors.white60),
-            filled: true,
-            fillColor: const Color(0xFF1E2533),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '프리셋 이름 변경',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                maxLength: 7,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  counterStyle: const TextStyle(color: Colors.white54),
+                  labelText: '새 이름 (최대 7글자)',
+                  labelStyle: const TextStyle(color: Colors.white60),
+                  filled: true,
+                  fillColor: const Color(0xFF1E2533),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        final value = controller.text.trim();
+                        if (value.isEmpty) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('❌ 이름을 입력해주세요')),
+                          );
+                          return;
+                        }
+                        if (value.length > 7) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('❌ 이름은 최대 7글자까지 가능합니다')),
+                          );
+                          return;
+                        }
+                        Navigator.pop(ctx, value);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryBlue,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text('변경', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: primaryBlue),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text('취소', style: TextStyle(color: primaryBlue)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('취소', style: TextStyle(color: Colors.white70)),
-          ),
-          TextButton(
-            onPressed: () {
-              if (controller.text.trim().isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('❌ 이름을 입력해주세요')),
-                );
-                return;
-              }
-              if (controller.text.trim().length > 7) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('❌ 이름은 최대 7글자까지 가능합니다')),
-                );
-                return;
-              }
-              Navigator.pop(ctx, controller.text.trim());
-            },
-            child: const Text('변경', style: TextStyle(color: primaryBlue)),
-          ),
-        ],
       ),
     );
 
     if (newName != null && newName.isNotEmpty) {
-      print('🛠 이름 변경 요청: id=${preset['id']} → $newName');
-
-      final updated = await PresetService.updatePreset(
-        preset['id'],
+      final ok = await PresetService.updatePresetName(
+        (preset['id'] is int) ? preset['id'] as int : int.parse('${preset['id']}'),
         newName,
         _profileId!,
-        preset['deviceId'],
-        preset['position'] ?? {'x': 0, 'y': 0, 'z': 0},
       );
 
-      if (updated) {
+      if (ok) {
         await _loadProfileAndPresets();
         _showSnackBar('✅ 프리셋 이름이 변경되었습니다');
       } else {
@@ -123,32 +153,68 @@ class _PresetPageState extends State<PresetPage> {
     }
   }
 
-
+  // 삭제 다이얼로그 (왼쪽=삭제, 오른쪽=취소)
   void _deletePreset(int index) async {
     final preset = _presets[index];
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity(0.6),
+      builder: (ctx) => Dialog(
         backgroundColor: cardGrey,
-        title: const Text('프리셋 삭제', style: TextStyle(color: Colors.white)),
-        content: Text('“${preset['name']}”을(를) 삭제하시겠습니까?',
-            style: const TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('취소', style: TextStyle(color: Colors.white70)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '프리셋 삭제',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text('“${preset['name']}”을(를) 삭제하시겠습니까?', style: const TextStyle(color: Colors.white70)),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text('삭제', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: primaryBlue),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text('취소', style: TextStyle(color: primaryBlue)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('삭제', style: TextStyle(color: Colors.redAccent)),
-          ),
-        ],
+        ),
       ),
     );
 
     if (confirmed == true) {
-      print('🛠 삭제 요청 ID: ${preset['id']}'); // ✅ 로그 확인
-      final deleted = await PresetService.deletePreset(preset['id']); // ✅ 수정
+      final deleted = await PresetService.deletePreset(
+        (preset['id'] is int) ? preset['id'] as int : int.parse('${preset['id']}'),
+      );
       if (deleted) {
         await _loadProfileAndPresets();
         _showSnackBar('✅ 프리셋이 삭제되었습니다');
@@ -157,7 +223,6 @@ class _PresetPageState extends State<PresetPage> {
       }
     }
   }
-
 
   void _showSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -181,7 +246,7 @@ class _PresetPageState extends State<PresetPage> {
         title: const Text('프리셋', style: TextStyle(fontWeight: FontWeight.bold)),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context,true),
+          onPressed: () => Navigator.pop(context, true),
         ),
       ),
       body: SafeArea(
@@ -192,7 +257,7 @@ class _PresetPageState extends State<PresetPage> {
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                 children: [
                   ..._presets.map((preset) => _buildPresetCard(preset)).toList(),
-                  if (_presets.length < 3) ...[ // ✅ 3개 미만일 때만 표시
+                  if (_presets.length < 3) ...[
                     const SizedBox(height: 14),
                     _buildSquareAddButton(),
                   ],
@@ -205,18 +270,16 @@ class _PresetPageState extends State<PresetPage> {
               child: SizedBox(
                 width: double.infinity,
                 height: 50,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.save, size: 18, color: Colors.white),
+                child: ElevatedButton(
                   onPressed: () {
                     Navigator.pop(context, true);
                     _showSnackBar('✅ 저장되었습니다');
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: primaryBlue,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  label: const Text('저장', style: TextStyle(fontSize: 16, color: Colors.white)),
+                  child: const Text('저장', style: TextStyle(fontSize: 16, color: Colors.white)),
                 ),
               ),
             ),
@@ -226,7 +289,7 @@ class _PresetPageState extends State<PresetPage> {
     );
   }
 
-  /// ✅ 프리셋 카드 위젯
+  /// 프리셋 카드
   Widget _buildPresetCard(Map<String, dynamic> preset) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
@@ -257,7 +320,7 @@ class _PresetPageState extends State<PresetPage> {
     );
   }
 
-  /// ✅ 정사각형 + 버튼 (3개 미만일 때만 표시)
+  /// 정사각형 + 버튼
   Widget _buildSquareAddButton() {
     return Center(
       child: GestureDetector(
@@ -270,32 +333,6 @@ class _PresetPageState extends State<PresetPage> {
             borderRadius: BorderRadius.circular(14),
           ),
           child: const Icon(Icons.add, color: Colors.white, size: 32),
-        ),
-      ),
-    );
-  }
-
-  /// ✅ 저장 버튼
-  Widget _buildSaveButton() {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 24),
-      child: SizedBox(
-        width: double.infinity,
-        height: 50,
-        child: ElevatedButton.icon(
-          icon: const Icon(Icons.save, size: 18, color: Colors.white),
-          onPressed: () {
-            Navigator.pop(context);
-            _showSnackBar('✅ 저장되었습니다');
-          },
-          style: ElevatedButton.styleFrom(
-            backgroundColor: primaryBlue,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-          label: const Text(
-            '저장',
-            style: TextStyle(fontSize: 16, color: Colors.white),
-          ),
         ),
       ),
     );
