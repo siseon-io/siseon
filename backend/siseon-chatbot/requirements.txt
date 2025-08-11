@@ -2,7 +2,7 @@
 fastapi>=0.100.0,<0.110.0
 uvicorn[standard]>=0.23.2
 
-# 설정 파일 & 환경변수
+# 설정 파일 & 환경변수 세팅
 python-dotenv==1.1.1
 python-jose==3.3.0
 PyYAML==6.0.2
