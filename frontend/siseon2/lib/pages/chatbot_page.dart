@@ -1,15 +1,16 @@
 // lib/pages/chat/chatbot_page.dart
+import 'dart:async'; // ✅ 점 애니메이션용
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter/services.dart';
 
 import 'package:siseon2/services/chat_api.dart';
 import 'package:siseon2/models/chat_models.dart';
-import 'package:flutter/services.dart';
-import 'package:siseon2/services/auth_service.dart';
-import 'package:siseon2/services/profile_cache_service.dart';
+import 'package:siseon2/services/profile_cache_service.dart'; // 사용자 아바타
+import 'package:siseon2/services/faq_service.dart'; // ✅ FAQ API
 
 class ChatbotPage extends StatefulWidget {
-  final int profileId; // ✅ 프로필 ID 필요
+  final int profileId;
 
   const ChatbotPage({super.key, required this.profileId});
 
@@ -18,13 +19,15 @@ class ChatbotPage extends StatefulWidget {
 }
 
 class _ChatbotPageState extends State<ChatbotPage> {
-  // ── THEME ────────────────────────────────────────────────────────────────────
+  // THEME
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color rootBackground = Color(0xFF161B22);
   static const Color bubbleBg = Color(0xFF1F2937);
   static const Color inputBg = Color(0xFF111827);
+  static const String assistantDisplayName = 'SEONY';
+  static const double avatarSize = 32;
 
-  // ── STATE ────────────────────────────────────────────────────────────────────
+  // STATE
   final List<ChatMessage> _messages = [];
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scroll = ScrollController();
@@ -34,23 +37,66 @@ class _ChatbotPageState extends State<ChatbotPage> {
   bool _loading = true;
   bool _sending = false;
 
-  // ── LIFECYCLE ────────────────────────────────────────────────────────────────
+  // 타이핑 인디케이터 상태
+  bool _assistantTyping = false;
+  Timer? _typingTimer;
+  int _typingDots = 1; // 1~3 사이에서 왕복
+  int _typingDir = 1;  // 1이면 증가, -1이면 감소
+
+  ImageProvider? _userAvatar;
+
+  // TIME
+  DateTime nowKstLocal() {
+    final kst = DateTime.now().toUtc().add(const Duration(hours: 9));
+    return DateTime(
+        kst.year, kst.month, kst.day, kst.hour, kst.minute, kst.second, kst.millisecond, kst.microsecond
+    );
+  }
+
+  String _formatBubbleTime(DateTime dt) => _timeFmt.format(dt.toLocal());
+  bool _sameDay(DateTime a, DateTime b) => a.year == b.year && a.month == b.month && a.day == b.day;
+  String _dateChipText(DateTime dt) => DateFormat('MM.dd (E)', 'ko_KR').format(dt);
+
   @override
   void initState() {
     super.initState();
+    _loadUserAvatar();
     _loadHistory();
+  }
+
+  @override
+  void dispose() {
+    _typingTimer?.cancel();
+    _controller.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadUserAvatar() async {
+    try {
+      final prof = await ProfileCacheService.loadProfile();
+      final imageUrl = prof?['imageUrl'];
+      ImageProvider img;
+      if (imageUrl != null && imageUrl.toString().startsWith('http')) {
+        img = NetworkImage(imageUrl);
+      } else if (imageUrl != null && imageUrl.toString().startsWith('assets/')) {
+        img = AssetImage(imageUrl);
+      } else {
+        img = const AssetImage('assets/images/profile_cat.png');
+      }
+      if (!mounted) return;
+      setState(() => _userAvatar = img);
+    } catch (_) {}
   }
 
   Future<void> _loadHistory() async {
     try {
       final hist = await _api.fetchHistory(profileId: widget.profileId);
       setState(() {
-        _messages
-          ..clear()
-          ..addAll(hist);
+        _messages..clear()..addAll(hist);
         _loading = false;
       });
-      _jumpToNewest(); // reverse=true에서 0으로 스크롤이 최신
+      _jumpToNewest();
     } catch (e) {
       setState(() => _loading = false);
       if (mounted) {
@@ -61,12 +107,44 @@ class _ChatbotPageState extends State<ChatbotPage> {
     }
   }
 
-  // ── SEND ─────────────────────────────────────────────────────────────────────
+  // ── 타이핑 인디케이터 제어 ─────────────────────────────────────────────
+  void _startTyping() {
+    _typingTimer?.cancel();
+    setState(() {
+      _assistantTyping = true;
+      _typingDots = 1;
+      _typingDir = 1;
+    });
+    _typingTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!mounted) return;
+      setState(() {
+        // 1→2→3→2→1 왕복
+        _typingDots += _typingDir;
+        if (_typingDots >= 3) {
+          _typingDots = 3;
+          _typingDir = -1;
+        } else if (_typingDots <= 1) {
+          _typingDots = 1;
+          _typingDir = 1;
+        }
+      });
+    });
+  }
+
+  void _stopTyping() {
+    _typingTimer?.cancel();
+    _typingTimer = null;
+    if (mounted) {
+      setState(() => _assistantTyping = false);
+    }
+  }
+
+  // SEND(일반 질문)
   Future<void> _onSend() async {
     final text = _controller.text.trim();
     if (text.isEmpty || _sending) return;
 
-    final now = DateTime.now();
+    final now = nowKstLocal();
     setState(() {
       _messages.add(ChatMessage(role: 'user', content: text, createdAt: now));
       _sending = true;
@@ -74,21 +152,12 @@ class _ChatbotPageState extends State<ChatbotPage> {
     _controller.clear();
     _jumpToNewest();
 
-    try {
-      final res = await _api.sendQuestion(
-        profileId: widget.profileId,
-        question: text,
-      );
-      final assistantText = _composeAssistantText(res.summary, res.details);
+    _startTyping(); // ✅ 애니메이션 시작
 
-      setState(() {
-        _messages.add(ChatMessage(
-          role: 'assistant',
-          content: assistantText,
-          createdAt: res.createdAt,
-        ));
-      });
-      _jumpToNewest();
+    try {
+      final res = await _api.sendQuestion(profileId: widget.profileId, question: text);
+      final botText = (res.summary.isEmpty) ? '(빈 응답)' : res.summary;
+      _addBotBubble(botText, createdAt: res.createdAt);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -96,30 +165,53 @@ class _ChatbotPageState extends State<ChatbotPage> {
         );
       }
     } finally {
+      _stopTyping(); // ✅ 애니메이션 종료
       if (mounted) setState(() => _sending = false);
     }
   }
 
-  String _composeAssistantText(String summary, Map<String, dynamic> details) {
-    if (details.isEmpty) return summary;
-    final tail = details.toString(); // 필요하면 예쁘게 렌더링하도록 후속 개선
-    return summary.isEmpty ? tail : '$summary\n\n$tail';
+  void _addBotBubble(String text, {DateTime? createdAt}) {
+    setState(() {
+      _messages.add(ChatMessage(
+        role: 'assistant', content: text, createdAt: createdAt ?? nowKstLocal(),
+      ));
+    });
+    _jumpToNewest();
+  }
+
+  void _addUserBubble(String text, {DateTime? createdAt}) {
+    setState(() {
+      _messages.add(ChatMessage(
+        role: 'user', content: text, createdAt: createdAt ?? nowKstLocal(),
+      ));
+    });
+    _jumpToNewest();
   }
 
   void _jumpToNewest() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
-        // reverse: true 이므로 0이 최신쪽
-        _scroll.animateTo(
-          0,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
+        _scroll.animateTo(0, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
       }
     });
   }
 
-  // ── UI ───────────────────────────────────────────────────────────────────────
+  // FAQ 바텀시트 열기 → 질문/답변 둘 다 바로 추가
+  Future<void> _openFaqSheet() async {
+    // ✅ 이름 있는 레코드로 반환
+    final qa = await showModalBottomSheet<({String q, String a})?>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _FaqSheet(profileId: widget.profileId),
+    );
+
+    if (qa != null) {
+      _addUserBubble('[FAQ] ${qa.q}'); // 질문 즉시 표시
+      _addBotBubble(qa.a);             // 답변 즉시 표시
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -127,75 +219,68 @@ class _ChatbotPageState extends State<ChatbotPage> {
       appBar: AppBar(
         backgroundColor: rootBackground,
         elevation: 0,
-        title: const Text('챗봇', style: TextStyle(color: Colors.white)),
+        title: const Text('SEONY', style: TextStyle(color: Colors.white)),
         actions: [
           IconButton(
-            icon: const Icon(Icons.bug_report, color: Colors.white),
-            onPressed: () async {
-              final token = await AuthService.getValidAccessToken();
-              final prof = await ProfileCacheService.loadProfile();
-              final pid = prof?['profileId'] ?? prof?['id'];
-              await Clipboard.setData(ClipboardData(text: token ?? ''));
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('토큰 복사됨, profileId=$pid')),
-              );
-              debugPrint('[DEBUG] token=${token?.substring(0,20)}...  pid=$pid');
-            },
-            tooltip: '토큰 복사',
+            icon: const Icon(Icons.help_outline, color: Colors.white),
+            tooltip: 'FAQ 바로답변',
+            onPressed: _openFaqSheet,
           ),
         ],
       ),
       body: Column(
         children: [
-          if (_loading)
-            const LinearProgressIndicator(minHeight: 2),
+          _header(),
+          if (_loading) const LinearProgressIndicator(minHeight: 2),
+
           Expanded(
             child: ListView.builder(
               controller: _scroll,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               itemCount: _messages.length,
-              reverse: true, // ✅ 최신이 아래쪽처럼 보이게
+              reverse: true,
               itemBuilder: (context, index) {
-                final m = _messages[_messages.length - 1 - index];
+                final realIdx = _messages.length - 1 - index;
+                final m = _messages[realIdx];
                 final isUser = m.role == 'user';
-                final timeStr = _timeFmt.format(m.createdAt);
+                final timeStr = _formatBubbleTime(m.createdAt);
 
-                return Align(
-                  alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                  child: Container(
-                    margin: const EdgeInsets.symmetric(vertical: 6),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    constraints: BoxConstraints(
-                      maxWidth: MediaQuery.of(context).size.width * 0.75,
+                final bool showDateChip = realIdx == 0
+                    ? true
+                    : !_sameDay(m.createdAt, _messages[realIdx - 1].createdAt);
+
+                final bubble = _buildBubble(content: m.content, timeStr: timeStr, isUser: isUser);
+
+                return Column(
+                  crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                  children: [
+                    if (showDateChip) _dateChip(_dateChipText(m.createdAt)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start, // 아바타 위정렬
+                        mainAxisAlignment: isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+                        children: isUser
+                            ? [
+                          Flexible(child: bubble),
+                          const SizedBox(width: 6),
+                          Padding(padding: const EdgeInsets.only(top: 2), child: _userAvatarWidget()),
+                        ]
+                            : [
+                          Padding(padding: const EdgeInsets.only(top: 2), child: _assistantAvatar()),
+                          const SizedBox(width: 6),
+                          Flexible(child: bubble),
+                        ],
+                      ),
                     ),
-                    decoration: BoxDecoration(
-                      color: isUser ? primaryBlue : bubbleBg,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Column(
-                      crossAxisAlignment:
-                      isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          m.content,
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          timeStr,
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.8),
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+                  ],
                 );
               },
             ),
           ),
+
+          if (_assistantTyping) _typingIndicator(), // ✅ 애니메이션 텍스트
+
           SafeArea(
             top: false,
             child: Container(
@@ -208,30 +293,248 @@ class _ChatbotPageState extends State<ChatbotPage> {
                       controller: _controller,
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
-                        hintText: '메시지를 입력하세요…',
+                        hintText: 'SEONY에게 물어보기…',
                         hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
                         fillColor: inputBg,
                         filled: true,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 12),
-                        border: OutlineInputBorder(
-                          borderSide: BorderSide.none,
-                          borderRadius: BorderRadius.circular(14),
-                        ),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        border: OutlineInputBorder(borderSide: BorderSide.none, borderRadius: BorderRadius.circular(14)),
                       ),
                       onSubmitted: (_) => _onSend(),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  IconButton(
-                    onPressed: _sending ? null : _onSend,
-                    icon: const Icon(Icons.send_rounded, color: Colors.white),
-                  ),
+                  IconButton(onPressed: _sending ? null : _onSend, icon: const Icon(Icons.send_rounded, color: Colors.white)),
                 ],
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ── Sub-widgets
+  Widget _header() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+      decoration: const BoxDecoration(color: rootBackground),
+      child: Row(
+        children: [
+          _assistantAvatar(),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '자세·프리셋·앱 사용법, SEONY가 도와드려요.',
+              style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 12),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _assistantAvatar() {
+    return Container(
+      width: avatarSize,
+      height: avatarSize,
+      decoration: const BoxDecoration(color: primaryBlue, shape: BoxShape.circle),
+      alignment: Alignment.center,
+      child: const Text('S', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+    );
+  }
+
+  Widget _userAvatarWidget() {
+    final img = _userAvatar;
+    if (img == null) {
+      return Container(
+        width: avatarSize, height: avatarSize,
+        decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), shape: BoxShape.circle),
+        alignment: Alignment.center,
+        child: const Text('U', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w700)),
+      );
+    }
+    return CircleAvatar(radius: avatarSize / 2, backgroundImage: img);
+  }
+
+  Widget _buildBubble({required String content, required String timeStr, required bool isUser}) {
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(color: isUser ? primaryBlue : bubbleBg, borderRadius: BorderRadius.circular(14)),
+        child: Column(
+          crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            if (!isUser) ...[
+              const Text(assistantDisplayName, style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 2),
+            ],
+            GestureDetector(
+              onLongPress: () {
+                Clipboard.setData(ClipboardData(text: content));
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('메시지 복사됨')));
+              },
+              child: Text(content, style: const TextStyle(color: Colors.white, fontSize: 14)),
+            ),
+            const SizedBox(height: 4),
+            Text(timeStr, style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 11)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _dateChip(String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(12)),
+          child: Text(text, style: const TextStyle(color: Colors.white70, fontSize: 11)),
+        ),
+      ),
+    );
+  }
+
+  Widget _typingIndicator() {
+    final dots = '.' * _typingDots; // 1~3개 점
+    return Padding(
+      padding: const EdgeInsets.only(left: 12, right: 12, bottom: 8),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(color: bubbleBg, borderRadius: BorderRadius.circular(14)),
+          child: Text(
+            'SEONY가 답변을 만드는중 $dots',
+            style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────────
+// FAQ 바텀시트 — 탭 시 서버에 기록하고, 질문/답변을 함께 반환
+// ───────────────────────────────────────────────────────────────────────────────
+class _FaqSheet extends StatefulWidget {
+  final int profileId;
+  const _FaqSheet({required this.profileId});
+
+  @override
+  State<_FaqSheet> createState() => _FaqSheetState();
+}
+
+class _FaqSheetState extends State<_FaqSheet> {
+  String _q = '';
+  bool _loading = true;
+  List<Faq> _list = [];
+
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    try {
+      final (list, _etag, _fromCache) = await FaqService.getFaqs(q: _q);
+      setState(() {
+        _list = list;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() => _loading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('FAQ 불러오기 실패: $e')));
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      builder: (_, controller) => Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        decoration: const BoxDecoration(color: Color(0xFF161B22), borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+        child: Column(
+          children: [
+            Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 12), decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
+            Row(children: const [Icon(Icons.help_outline, color: Colors.white70), SizedBox(width: 8), Text('FAQ 빠른 답변', style: TextStyle(color: Colors.white, fontSize: 16))]),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _searchCtrl,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: '검색(질문/답변)',
+                hintStyle: const TextStyle(color: Colors.white54),
+                filled: true,
+                fillColor: const Color(0xFF0D1117),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                border: OutlineInputBorder(borderSide: BorderSide.none, borderRadius: BorderRadius.circular(12)),
+                prefixIcon: const Icon(Icons.search, color: Colors.white70),
+                suffixIcon: (_q.isNotEmpty || _searchCtrl.text.isNotEmpty)
+                    ? IconButton(
+                  icon: const Icon(Icons.clear, color: Colors.white70),
+                  onPressed: () { _q = ''; _searchCtrl.clear(); _load(); },
+                )
+                    : null,
+              ),
+              onSubmitted: (v) { _q = v.trim(); _load(); },
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _list.isEmpty
+                  ? const Center(child: Text('검색 결과 없음', style: TextStyle(color: Colors.white60)))
+                  : ListView.separated(
+                controller: controller,
+                itemCount: _list.length,
+                separatorBuilder: (_, __) => const Divider(height: 1, color: Colors.white10),
+                itemBuilder: (_, i) {
+                  final f = _list[i];
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                    title: Text(f.question, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                    subtitle: Padding(
+                      padding: const EdgeInsets.only(top: 6.0),
+                      child: Text(f.answer, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                    ),
+                    trailing: const Icon(Icons.chevron_right, color: Colors.white70),
+                    onTap: () async {
+                      try {
+                        final qa = await FaqService.answerFromFaq(faqId: f.id, profileId: widget.profileId);
+                        if (!mounted) return;
+                        // ✅ 질문/답변 둘 다 반환 (이름 있는 레코드)
+                        Navigator.pop(context, (q: f.question, a: qa.answer));
+                      } catch (e) {
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('요청 실패: $e')));
+                      }
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

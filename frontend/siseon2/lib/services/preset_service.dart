@@ -1,3 +1,4 @@
+// 📁 lib/services/preset_service.dart
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'auth_service.dart';
@@ -57,6 +58,41 @@ class PresetService {
       return jsonDecode(utf8.decode(response.bodyBytes));
     }
     return null;
+  }
+
+  /// ✅ (신설) FCM 'preset_suggest' 전용: 최신 자세로 프리셋 저장
+  /// 서버에 /api/preset/confirm 있으면 그걸 쓰고, 없으면 /api/preset로 폴백
+  static Future<void> confirm({
+    required int profileId,
+    String? name,
+  }) async {
+    final token = await AuthService.getValidAccessToken();
+    if (token == null) throw Exception('로그인 필요');
+
+    final headers = {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    };
+    final payload = {
+      'profileId': profileId,
+      if (name != null) 'name': name,
+    };
+
+    // 1차: /api/preset/confirm 시도
+    final urlConfirm = Uri.parse('$baseUrl/api/preset/confirm');
+    final resp = await http.post(urlConfirm, headers: headers, body: jsonEncode(payload));
+    if (resp.statusCode >= 200 && resp.statusCode < 300) return;
+
+    // 404/405면 구버전 서버로 판단 → /api/preset 사용
+    if (resp.statusCode == 404 || resp.statusCode == 405) {
+      final urlCreate = Uri.parse('$baseUrl/api/preset');
+      final resp2 = await http.post(urlCreate, headers: headers, body: jsonEncode(payload));
+      if (resp2.statusCode >= 200 && resp2.statusCode < 300) return;
+      throw Exception('status ${resp2.statusCode}: ${utf8.decode(resp2.bodyBytes)}');
+    }
+
+    // 기타 에러
+    throw Exception('status ${resp.statusCode}: ${utf8.decode(resp.bodyBytes)}');
   }
 
   /// 프리셋 이름만 수정

@@ -1,9 +1,19 @@
+// 📁 lib/pages/settings/preset_page.dart
 import 'package:flutter/material.dart';
+import '../../main.dart'; // navigatorKey (루트 스낵바용)
 import '../../services/profile_cache_service.dart';
 import '../../services/preset_service.dart';
 
 class PresetPage extends StatefulWidget {
-  const PresetPage({Key? key}) : super(key: key);
+  // 🔹 FCM에서 바로 진입할 때 전달받을 값들 (선택)
+  final int? profileId;
+  final bool fromSuggest; // FCM 'preset_suggest'로 진입했는지 표시
+
+  const PresetPage({
+    Key? key,
+    this.profileId,
+    this.fromSuggest = false,
+  }) : super(key: key);
 
   @override
   State<PresetPage> createState() => _PresetPageState();
@@ -12,6 +22,9 @@ class PresetPage extends StatefulWidget {
 class _PresetPageState extends State<PresetPage> {
   List<Map<String, dynamic>> _presets = [];
   int? _profileId;
+
+  bool _isLoading = false;      // 로딩 스피너 제어
+  bool _isConfirming = false;   // 제안 저장 중 표시
 
   static const Color backgroundBlack = Color(0xFF0D1117);
   static const Color cardGrey = Color(0xFF161B22);
@@ -26,15 +39,73 @@ class _PresetPageState extends State<PresetPage> {
   }
 
   Future<void> _loadProfileAndPresets() async {
-    final profile = await ProfileCacheService.loadProfile();
-    if (profile == null) return;
+    setState(() => _isLoading = true);
 
-    _profileId = profile['id'];
+    // 우선순위: 위젯 인자로 넘어온 profileId → 캐시
+    _profileId = widget.profileId;
+    if (_profileId == null) {
+      final profile = await ProfileCacheService.loadProfile();
+      if (!mounted) return;
+      if (profile == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
+      _profileId = profile['id'];
+    }
+
     final result = await PresetService.fetchPresets(_profileId!);
-    setState(() => _presets = result);
+    if (!mounted) return;
+    setState(() {
+      _presets = result;
+      _isLoading = false;
+    });
+  }
+
+  // 🔵 FCM 제안: "이 자세로 저장" 실행
+  Future<void> _confirmSuggestedPreset() async {
+    if (_profileId == null) {
+      _showSnackBar('❌ 프로필 정보를 찾을 수 없어요');
+      return;
+    }
+    if (_presets.length >= 3) {
+      _showSnackBar('❌ 프리셋은 최대 3개까지 가능합니다');
+      return;
+    }
+
+    final name = '프리셋 ${_presets.length + 1}';
+    try {
+      setState(() => _isConfirming = true);
+      await PresetService.confirm(profileId: _profileId!, name: name);
+      await _loadProfileAndPresets();
+
+      // 🔵 루트 컨텍스트로 스낵바(이 페이지 pop 전에 보장)
+      final rootCtx = navigatorKey.currentContext;
+      if (rootCtx != null) {
+        ScaffoldMessenger.of(rootCtx).showSnackBar(
+          const SnackBar(content: Text('✅ 프리셋이 저장되었습니다')),
+        );
+      }
+
+      // 🔵 FCM 제안으로 들어온 경우에는 바로 닫기
+      if (widget.fromSuggest && mounted) {
+        Navigator.pop(context, true);
+        return;
+      }
+
+      // 일반 진입 시엔 페이지 내부 스낵바
+      _showSnackBar('✅ "$name"으로 저장되었습니다');
+    } catch (e) {
+      _showSnackBar('❌ 저장 실패: $e');
+    } finally {
+      if (mounted) setState(() => _isConfirming = false);
+    }
   }
 
   Future<void> _addPreset() async {
+    if (_profileId == null) {
+      _showSnackBar('❌ 프로필 정보를 찾을 수 없어요');
+      return;
+    }
     if (_presets.length >= 3) {
       _showSnackBar('❌ 프리셋은 최대 3개까지 가능합니다');
       return;
@@ -50,7 +121,7 @@ class _PresetPageState extends State<PresetPage> {
     }
   }
 
-  // 이름 변경 다이얼로그 (왼쪽=변경, 오른쪽=취소)
+  // 이름 변경
   void _renamePreset(int index) async {
     final preset = _presets[index];
     final controller = TextEditingController(text: preset['name']);
@@ -153,7 +224,7 @@ class _PresetPageState extends State<PresetPage> {
     }
   }
 
-  // 삭제 다이얼로그 (왼쪽=삭제, 오른쪽=취소)
+  // 삭제
   void _deletePreset(int index) async {
     final preset = _presets[index];
     final confirmed = await showDialog<bool>(
@@ -225,6 +296,7 @@ class _PresetPageState extends State<PresetPage> {
   }
 
   void _showSnackBar(String message) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -250,8 +322,12 @@ class _PresetPageState extends State<PresetPage> {
         ),
       ),
       body: SafeArea(
-        child: Column(
+        child: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
           children: [
+            // 🔹 FCM 제안 배너: fromSuggest=true일 때만 표시
+            if (widget.fromSuggest) _suggestBanner(),
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -272,8 +348,14 @@ class _PresetPageState extends State<PresetPage> {
                 height: 50,
                 child: ElevatedButton(
                   onPressed: () {
+                    // 🔵 pop 전에 루트 스낵바로 안내(컨텍스트 안전)
+                    final rootCtx = navigatorKey.currentContext;
+                    if (rootCtx != null) {
+                      ScaffoldMessenger.of(rootCtx).showSnackBar(
+                        const SnackBar(content: Text('✅ 저장되었습니다')),
+                      );
+                    }
                     Navigator.pop(context, true);
-                    _showSnackBar('✅ 저장되었습니다');
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: primaryBlue,
@@ -285,6 +367,44 @@ class _PresetPageState extends State<PresetPage> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 🔹 프리셋 제안 배너 (상단)
+  Widget _suggestBanner() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A), // 짙은 남색
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: primaryBlue.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('이 자세로 프리셋을 저장할까요?',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
+          const SizedBox(height: 8),
+          const Text('최근 1시간 동안 비슷한 자세가 유지됐어요.',
+              style: TextStyle(color: Colors.white70, fontSize: 13)),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            height: 42,
+            child: ElevatedButton(
+              onPressed: _isConfirming ? null : _confirmSuggestedPreset,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryBlue,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              child: _isConfirming
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Text('이 자세로 저장', style: TextStyle(color: Colors.white)),
+            ),
+          ),
+        ],
       ),
     );
   }

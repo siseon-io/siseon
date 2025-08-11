@@ -1,3 +1,4 @@
+// 📁 lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -5,7 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:siseon2/services/mqtt_service.dart';
 import 'package:siseon2/services/auth_service.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
-import 'package:siseon2/services/device_cache_service.dart'; // ✅ 기기 캐시
+import 'package:siseon2/services/device_cache_service.dart';
 import 'package:siseon2/services/fcm_service.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
@@ -13,27 +14,23 @@ import '/login_screen.dart';
 import '/profile_select_screen.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ✅ 한국어 로케일 초기화 (에러 해결)
   await initializeDateFormatting('ko_KR', null);
-
-  // ✅ 환경 변수 로드
   await dotenv.load(fileName: ".env");
 
-  // ✅ Firebase 초기화
+  // ✅ Firebase & FCM를 가장 먼저 세팅
   await Firebase.initializeApp();
+  await FCMService.initialize();        // ⬅️ 여기서 설정(중요)
 
-  // ✅ MQTT 연결
+  // ✅ 나머지 초기화
   await mqttService.connect();
-
-  // ✅ 세로 고정
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
   runApp(const MyApp());
 }
-
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
@@ -67,18 +64,18 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> initApp() async {
+    // ⏳ 간단한 스플래시 연출
     await Future.delayed(const Duration(seconds: 2));
 
-    // ✅ FCM 초기화
-    await FCMService.initialize();
+    // ❌ 여기서 FCMService.initialize() 호출하던 거 제거함
 
     // ✅ 로그인 여부 확인
     final token = await AuthService.getValidAccessToken();
+    if (!mounted) return;
+
     if (token != null) {
-      // ✅ 로그인된 상태라면 캐시에서 프로필과 기기 정보 불러오기
       await ProfileCacheService.loadProfile();
       await DeviceCacheService.loadDevice();
-
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const ProfileSelectScreen()),
