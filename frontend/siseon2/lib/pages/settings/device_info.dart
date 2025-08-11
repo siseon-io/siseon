@@ -1,8 +1,11 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
+
 import 'package:siseon2/services/profile_cache_service.dart';
 import 'package:siseon2/services/auth_service.dart';
-import 'package:http/http.dart' as http;
+import 'package:siseon2/services/device_cache_service.dart';
 
 class DeviceInfoPage extends StatefulWidget {
   const DeviceInfoPage({super.key});
@@ -12,9 +15,15 @@ class DeviceInfoPage extends StatefulWidget {
 }
 
 class _DeviceInfoPageState extends State<DeviceInfoPage> {
+  static const Color backgroundBlack = Color(0xFF0D1117);
+  static const Color cardGrey       = Color(0xFF161B22);
+  static const Color primaryBlue    = Color(0xFF3B82F6);
+
   Map<String, dynamic>? _profile;
   String? _deviceSerial;
   bool _isLoading = true;
+
+  int? get _profileIdSafe => _profile?['profileId'] ?? _profile?['id'];
 
   @override
   void initState() {
@@ -22,28 +31,89 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
     _loadProfileAndDevice();
   }
 
-  /// ✅ 프로필과 기기 정보 불러오기
   Future<void> _loadProfileAndDevice() async {
-    final profile = await ProfileCacheService.loadProfile();
-    final prefs = await SharedPreferences.getInstance();
-    final serial = prefs.getString('deviceSerial');
+    setState(() => _isLoading = true);
 
+    final profile = await ProfileCacheService.loadProfile();
+    String? serial;
+
+    if (profile != null) {
+      final pid = profile['profileId'] ?? profile['id'];
+      if (pid != null) {
+        // 서버 우선 조회
+        try {
+          final token = await AuthService.getValidAccessToken();
+          final res = await http.get(
+            Uri.parse('http://i13b101.p.ssafy.io:8080/api/device/profile/$pid'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Accept': 'application/json',
+            },
+          );
+
+          if (res.statusCode == 200 && res.body.isNotEmpty) {
+            final decoded = jsonDecode(res.body);
+            serial = _extractSerial(decoded);
+          } else if (res.statusCode == 404 || res.statusCode == 204) {
+            serial = null;
+          }
+        } catch (_) {/* 네트워크 실패 시 아래 캐시 폴백 */}
+
+        // 캐시 폴백
+        if (serial == null) {
+          final device = await DeviceCacheService.loadDeviceForProfile(pid);
+          final s = (device?['serial'] as String?)?.trim();
+          if (s != null && s.isNotEmpty) serial = s;
+        }
+      }
+    }
+
+    // 레거시 폴백
+    if (serial == null) {
+      final prefs = await SharedPreferences.getInstance();
+      serial = prefs.getString('deviceSerial');
+    }
+
+    if (!mounted) return;
     setState(() {
       _profile = profile;
       _deviceSerial = serial;
       _isLoading = false;
     });
-    print("📦 불러온 프로필: $_profile");
   }
 
-  /// ✅ 기기 삭제 처리
+  String? _extractSerial(dynamic json) {
+    if (json == null) return null;
+    if (json is Map) {
+      for (final k in ['serial', 'deviceSerial', 'device_serial']) {
+        final v = json[k];
+        if (v is String && v.trim().isNotEmpty) return v.trim();
+      }
+      if (json.containsKey('data')) return _extractSerial(json['data']);
+    }
+    if (json is List) {
+      for (final item in json) {
+        final s = _extractSerial(item);
+        if (s != null) return s;
+      }
+    }
+    return null;
+  }
+
   Future<void> _deleteDevice() async {
-    if (_profile == null) return;
-    final profileId = _profile!['id'];
+    if (_profileIdSafe == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('프로필 ID를 찾을 수 없습니다.')),
+      );
+      return;
+    }
 
     final confirm = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
+        backgroundColor: cardGrey,
+        titleTextStyle: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+        contentTextStyle: const TextStyle(color: Colors.white70, fontSize: 14),
         title: const Text("기기 삭제"),
         content: const Text("등록된 기기를 삭제하시겠습니까?\n삭제 후에는 다시 등록해야 합니다."),
         actions: [
@@ -54,6 +124,7 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, false),
+            style: TextButton.styleFrom(foregroundColor: primaryBlue),
             child: const Text("취소"),
           ),
         ],
@@ -62,40 +133,48 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
 
     if (confirm != true) return;
 
-    final token = await AuthService.getValidAccessToken();
-    final res = await http.delete(
-      Uri.parse('http://i13b101.p.ssafy.io:8080/api/device/profile/$profileId'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-    );
+    try {
+      final token = await AuthService.getValidAccessToken();
+      final res = await http.delete(
+        Uri.parse('http://i13b101.p.ssafy.io:8080/api/device/profile/${_profileIdSafe!}'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
 
-    if (res.statusCode == 200 || res.statusCode == 204) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove('deviceSerial');
-      await prefs.setBool('isDeviceRegistered', false);
+      if (res.statusCode == 200 || res.statusCode == 204) {
+        // ✅ 프로필별 캐시 정리 (진짜 핵심)
+        await DeviceCacheService.clearDeviceForProfile(_profileIdSafe!);
 
-      if (mounted) {
-        Navigator.pop(context, true); // ✅ 홈 화면으로 돌아가면서 true 전달
+        // (레거시) 전역 키도 정리
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('deviceSerial');
+        await prefs.remove('isDeviceRegistered');
+
+        if (!mounted) return;
+        setState(() => _deviceSerial = null);
+        Navigator.pop(context, true);
+      } else {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ 삭제 실패(${res.statusCode}) : ${res.body}')),
+        );
       }
-    } else {
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('❌ 삭제 실패: ${res.statusCode}')),
+        SnackBar(content: Text('네트워크 오류: $e')),
       );
     }
   }
 
-  /// ✅ 프로필 이미지 위젯 빌더 (Asset / Network 자동 처리)
   ImageProvider _buildProfileImage() {
     final imageUrl = _profile?['imageUrl'];
-
     if (imageUrl != null && imageUrl.toString().isNotEmpty) {
-      if (imageUrl.toString().startsWith('http')) {
-        return NetworkImage(imageUrl);
-      } else {
-        return AssetImage(imageUrl);
-      }
+      if (imageUrl.toString().startsWith('http')) return NetworkImage(imageUrl);
+      return AssetImage(imageUrl);
     }
     return const AssetImage('assets/images/profile_cat.png');
   }
@@ -104,51 +183,62 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return const Scaffold(
-        backgroundColor: Color(0xFF161B22),
+        backgroundColor: backgroundBlack,
         body: Center(child: CircularProgressIndicator(color: Colors.white)),
       );
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFF161B22),
+      backgroundColor: backgroundBlack,
       appBar: AppBar(
         title: const Text("기기 정보"),
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: backgroundBlack,
         foregroundColor: Colors.white,
+        elevation: 0,
         actions: [
-          if (_deviceSerial != null)
-            IconButton(
-              icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
-              onPressed: _deleteDevice,
+          IconButton(
+            tooltip: _deviceSerial == null ? '등록된 기기 없음' : '기기 삭제',
+            onPressed: _deviceSerial == null ? null : _deleteDevice,
+            icon: Icon(
+              Icons.delete_forever,
+              color: _deviceSerial == null ? Colors.white24 : Colors.redAccent,
             ),
+          ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
+      body: RefreshIndicator(
+        color: Colors.white,
+        backgroundColor: backgroundBlack,
+        onRefresh: _loadProfileAndDevice,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           children: [
-            /// 프로필 이미지
-            CircleAvatar(
-              radius: 50,
-              backgroundImage: _buildProfileImage(),
+            const SizedBox(height: 8),
+            Center(
+              child: CircleAvatar(
+                radius: 50,
+                backgroundColor: Colors.grey[800],
+                backgroundImage: _buildProfileImage(),
+              ),
             ),
-            const SizedBox(height: 16),
-
-            /// 사용자 이름
-            Text(
-              _profile?['name'] ?? '사용자 이름',
-              style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+            const SizedBox(height: 12),
+            Center(
+              child: Text(
+                _profile?['name'] ?? '사용자',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
-            const SizedBox(height: 32),
-
-            /// 기기 정보 카드
+            const SizedBox(height: 24),
             Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(16),
+                color: cardGrey,
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -157,7 +247,7 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
                   const SizedBox(height: 6),
                   Text(
                     _deviceSerial ?? '등록된 기기가 없습니다.',
-                    style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),

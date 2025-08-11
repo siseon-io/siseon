@@ -1,3 +1,4 @@
+// lib/pages/home_screen.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -19,8 +20,11 @@ import 'package:siseon2/services/stats_service.dart';
 import 'package:siseon2/pages/ble_scan_screen.dart';
 import 'package:siseon2/pages/device_register_page.dart';
 import 'package:siseon2/pages/settings/preset_page.dart';
+import 'package:siseon2/pages/settings/stats_page.dart';
+import 'package:siseon2/pages/settings/edit_profile.dart';
 
-// 🔹 enum은 파일 최상위에 둬야 함
+import 'package:siseon2/widgets/rect_card.dart';
+
 enum PostureBannerStatus { good, bad, none }
 
 class HomeScreen extends StatefulWidget {
@@ -45,22 +49,15 @@ class HomeScreen extends StatefulWidget {
 }
 
 class HomeScreenState extends State<HomeScreen> {
-  // THEME
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color backgroundBlack = Color(0xFF0D1117);
   static const Color headerGrey = Color(0xFF161B22);
   static const Color cardGrey = Color(0xFF1E293B);
   static const Color errorRed = Color(0xFFF87171);
 
-  // Top grid sizes
   static const double _rightCardHeight = 64.0;
   static const double _rightGap = 8.0;
-
-  // Today stats sizes
-  static const double kTodayCardHeight = 140;
-  static const double kDonutSize = 50;        // 도넛 지름
-  static const double kSliceThickness = 4;    // 링 두께
-  static const double kDonutLeftOffset = 40;  // 왼쪽 여백
+  static const double _sectionIconSize = 18;
 
   Map<String, dynamic>? _profile;
   List<Map<String, dynamic>> _presets = [];
@@ -75,13 +72,11 @@ class HomeScreenState extends State<HomeScreen> {
 
   late ControlMode _mode;
 
-  // daily stats
   int _goodSecToday = 0;
   int _badSecToday = 0;
 
-  // 최근 자세 배너 상태
   Timer? _postureTimer;
-  DateTime? _postureTime; // endAt 기준
+  DateTime? _postureTime;
   bool _loadingPosture = false;
   PostureBannerStatus _postureStatus = PostureBannerStatus.none;
 
@@ -93,7 +88,7 @@ class HomeScreenState extends State<HomeScreen> {
     _initPermissions();
     _checkBluetoothState();
     _syncProfileAndDevice();
-    _loadLatestPosture(); // 첫 진입 로드
+    _loadLatestPosture();
     _postureTimer =
         Timer.periodic(const Duration(minutes: 5), (_) => _loadLatestPosture());
   }
@@ -120,7 +115,6 @@ class HomeScreenState extends State<HomeScreen> {
 
   void setModeExternal(ControlMode newMode) => _setMode(newMode);
 
-  // PERMS / BLE
   Future<void> _initPermissions() async {
     final bleScan = await Permission.bluetoothScan.request();
     final bleConnect = await Permission.bluetoothConnect.request();
@@ -138,7 +132,6 @@ class HomeScreenState extends State<HomeScreen> {
     setState(() => _isBluetoothOn = isOn);
   }
 
-  // LOAD
   Future<void> _syncProfileAndDevice() async {
     final profile = await ProfileCacheService.loadProfile();
     final pid = profile?['id'] as int?;
@@ -199,9 +192,8 @@ class HomeScreenState extends State<HomeScreen> {
 
       int g = 0, b = 0;
       for (final s in daily) {
-        // ✅ 서버의 validPosture만 사용
         final v = _valid(s);
-        if (v == null) continue; // 값 없으면 스킵 (원하면 false로 처리 가능)
+        if (v == null) continue;
         if (v) {
           g += s.durationSeconds;
         } else {
@@ -222,7 +214,6 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // 최근 자세 1건 조회 (배치 10분 주기 → 5분 폴링)
   Future<void> _loadLatestPosture() async {
     try {
       setState(() => _loadingPosture = true);
@@ -257,16 +248,14 @@ class HomeScreenState extends State<HomeScreen> {
         return;
       }
 
-      // 최신(endAt 기준)으로 정렬 후 가장 마지막 사용
       list.sort((a, b) => a.endAt.compareTo(b.endAt));
       final latest = list.last;
 
-      // ✅ 서버 validPosture만 사용
       final v = _valid(latest);
 
       setState(() {
         if (v == null) {
-          _postureStatus = PostureBannerStatus.none; // 값 없으면 배너 숨김
+          _postureStatus = PostureBannerStatus.none;
         } else {
           _postureStatus =
           v ? PostureBannerStatus.good : PostureBannerStatus.bad;
@@ -274,7 +263,7 @@ class HomeScreenState extends State<HomeScreen> {
         _postureTime = latest.endAt.toLocal();
         _loadingPosture = false;
       });
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _postureStatus = PostureBannerStatus.none;
@@ -284,7 +273,6 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // ✅ 서버값만 사용 (없으면 null)
   bool? _valid(PostureStats s) {
     try {
       final v = (s as dynamic).validPosture;
@@ -293,7 +281,6 @@ class HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
-  // DEVICE ACTIONS
   Future<void> _registerDevice() async {
     final result = await Navigator.push(
       context,
@@ -352,7 +339,6 @@ class HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // MODE / MQTT
   void _setMode(ControlMode newMode) {
     final prev = _mode;
     if (prev == newMode) return;
@@ -391,7 +377,6 @@ class HomeScreenState extends State<HomeScreen> {
     widget.onAiModeSwitch();
   }
 
-  // PRESET
   Future<void> _handlePresetSelect(int presetId) async {
     if (_profile == null) return;
     final prev = _mode;
@@ -408,7 +393,7 @@ class HomeScreenState extends State<HomeScreen> {
         body: jsonEncode({"profile_id": profileId, "preset_id": presetId}),
       );
       _setMode(ControlMode.preset);
-    } catch (e) {
+    } catch (_) {
       _publishMode(prev, prev);
     }
   }
@@ -430,7 +415,6 @@ class HomeScreenState extends State<HomeScreen> {
     if (created != null) await _loadProfileAndPresets();
   }
 
-  // HELPERS
   Color _getModeColor() {
     switch (_mode) {
       case ControlMode.auto:
@@ -454,7 +438,26 @@ class HomeScreenState extends State<HomeScreen> {
     return '${m}분';
   }
 
-  // UI
+  Widget _sectionHeader({required String title, VoidCallback? onTap}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(title,
+            style: const TextStyle(
+                color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        if (onTap != null)
+          IconButton(
+            onPressed: onTap,
+            icon: const Icon(Icons.settings, color: Colors.white70),
+            iconSize: _sectionIconSize,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            tooltip: title,
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_profile == null) {
@@ -470,13 +473,14 @@ class HomeScreenState extends State<HomeScreen> {
       backgroundColor: backgroundBlack,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+          padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 프로필 헤더
               Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                  const SizedBox(width: 2),
                   CircleAvatar(
                     radius: 24,
                     backgroundImage: (() {
@@ -493,63 +497,73 @@ class HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(_profile!['name'] ?? '사용자',
+                    child: Transform.translate(
+                      offset: const Offset(0, 4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            _profile!['name'] ?? '사용자',
                             style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white)),
-                        Text(_profile!['email'] ?? '',
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              height: 1.15,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _profile!['email'] ?? '',
                             style: const TextStyle(
-                                color: Colors.white70, fontSize: 12)),
-                      ],
+                              color: Colors.white70,
+                              fontSize: 12,
+                              height: 1.1,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.settings, color: Colors.white),
-                    onPressed: widget.onGoToProfile,
+                    onPressed: () async {
+                      final changed = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const EditProfilePage(),
+                        ),
+                      );
+                      if (changed == true) {
+                        _loadProfileAndPresets();
+                      }
+                    },
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
                   ),
                 ],
               ),
 
               const SizedBox(height: 12),
-
-              // 상단 3개 블록
               _buildTopGrid(isConnected),
-
               const SizedBox(height: 14),
-
-              // 최근 자세 배너 (통계 카드 위)
               _postureBanner(),
               const SizedBox(height: 12),
 
-              // 오늘 통계
+              _sectionHeader(title: '오늘 통계'),
+              const SizedBox(height: 8),
               _buildTodayStatsCard(),
 
               const SizedBox(height: 18),
-
-              // 프리셋
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text('프리셋',
-                      style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold)),
-                  IconButton(
-                    icon: const Icon(Icons.settings, color: Colors.white70),
-                    onPressed: () async {
-                      final changed = await Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const PresetPage()),
-                      );
-                      if (changed == true) await _loadProfileAndPresets();
-                    },
-                  ),
-                ],
+              _sectionHeader(
+                title: '프리셋',
+                onTap: () async {
+                  final changed = await Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const PresetPage()),
+                  );
+                  if (changed == true) await _loadProfileAndPresets();
+                },
               ),
               const SizedBox(height: 10),
               _buildPresetArea(),
@@ -560,7 +574,6 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Top Grid
   Widget _buildTopGrid(bool isConnected) {
     final leftHeight = _rightCardHeight * 2 + _rightGap;
     return Row(
@@ -590,10 +603,8 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _modeStatusCardCentered() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-      decoration:
-      BoxDecoration(color: headerGrey, borderRadius: BorderRadius.circular(14)),
+    return RectCard(
+      bgColor: headerGrey,
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -617,9 +628,8 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _powerToggleCard() {
-    return Container(
-      decoration:
-      BoxDecoration(color: headerGrey, borderRadius: BorderRadius.circular(14)),
+    return RectCard(
+      bgColor: headerGrey,
       child: Center(
         child: Switch.adaptive(
           value: _mode != ControlMode.off,
@@ -634,9 +644,8 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _bleCard(bool isConnected) {
-    return Container(
-      decoration:
-      BoxDecoration(color: headerGrey, borderRadius: BorderRadius.circular(14)),
+    return RectCard(
+      bgColor: headerGrey,
       child: Center(
         child: _isDeviceRegistered
             ? (!isConnected
@@ -650,13 +659,13 @@ class HomeScreenState extends State<HomeScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Icon(Icons.bluetooth_connected,
-                color: Colors.white70, size: 20),
+                color: primaryBlue, size: 20),
             const SizedBox(width: 6),
             TextButton(
               onPressed: _handleDisconnect,
               child: const Text('해제',
-                  style: TextStyle(
-                      color: Colors.white70, fontSize: 12)),
+                  style:
+                  TextStyle(color: Colors.white70, fontSize: 12)),
             ),
           ],
         ))
@@ -671,9 +680,8 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _bleCardSkeleton() {
-    return Container(
-      decoration:
-      BoxDecoration(color: headerGrey, borderRadius: BorderRadius.circular(14)),
+    return RectCard(
+      bgColor: headerGrey,
       child: const Center(
         child: SizedBox(
           width: 54,
@@ -686,23 +694,18 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // 최근 자세 배너 UI
   Widget _postureBanner() {
     if (_loadingPosture) {
-      return Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: headerGrey,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: primaryBlue.withOpacity(0.45)),
-        ),
+      return RectCard(
+        bgColor: headerGrey,
+        outlineColor: primaryBlue.withOpacity(0.45),
         child: const Row(
           children: [
             SizedBox(
               width: 18,
               height: 18,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Colors.white),
+              child:
+              CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
             ),
             SizedBox(width: 8),
             Expanded(
@@ -722,17 +725,12 @@ class HomeScreenState extends State<HomeScreen> {
     }
 
     final isGood = _postureStatus == PostureBannerStatus.good;
-    final title =
-    isGood ? '올바른 자세입니다! 대단해요!' : '잘못된 자세입니다! 교정해주세요!';
+    final title = isGood ? '올바른 자세입니다! 대단해요!' : '잘못된 자세입니다! 교정해주세요!';
     final icon = isGood ? Icons.check_circle : Icons.error_outline;
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: headerGrey,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isGood ? primaryBlue : errorRed),
-      ),
+    return RectCard(
+      bgColor: headerGrey,
+      outlineColor: isGood ? primaryBlue : errorRed,
       child: Row(
         children: [
           Icon(icon, color: isGood ? primaryBlue : errorRed),
@@ -754,170 +752,198 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Today stats
-  Widget _buildTodayStatsCard() {
-    final total = _goodSecToday + _badSecToday;
+  Widget _miniTodayPie() {
+    final good = _goodSecToday;
+    final bad = _badSecToday;
+    final total = good + bad;
 
-    return Container(
-      height: kTodayCardHeight,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: cardGrey,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          SizedBox(width: kDonutLeftOffset),
+    if (total == 0) {
+      return const Center(
+        child: Text('데이터 없음',
+            style: TextStyle(color: Colors.white70, fontSize: 12)),
+      );
+    }
 
-          // 도넛(작게, 고정 크기)
-          SizedBox(
-            width: kDonutSize,
-            height: kDonutSize,
-            child: total == 0
-                ? const SizedBox.shrink()
-                : PieChart(
-              PieChartData(
-                startDegreeOffset: -90,
-                sectionsSpace: 1,
-                centerSpaceRadius: kDonutSize / 2 - kSliceThickness,
-                sections: [
-                  PieChartSectionData(
-                    value: _badSecToday.toDouble(), // 잘못된 자세
-                    color: errorRed,
-                    showTitle: false,
-                  ),
-                  PieChartSectionData(
-                    value: _goodSecToday.toDouble(), // 올바른 자세
-                    color: primaryBlue,
-                    showTitle: false,
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(width: 12),
-
-          // 텍스트(가운데 정렬)
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  '오늘 통계',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.square, color: errorRed, size: 10),
-                    const SizedBox(width: 6),
-                    Text(
-                      '잘못된 자세 : ${_formatDurationKr(_badSecToday)}',
-                      style:
-                      const TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.square, color: primaryBlue, size: 10),
-                    const SizedBox(width: 6),
-                    Text(
-                      '올바른 자세 : ${_formatDurationKr(_goodSecToday)}',
-                      style:
-                      const TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+    return PieChart(
+      PieChartData(
+        sectionsSpace: 2,
+        centerSpaceRadius: 28,
+        sections: [
+          PieChartSectionData(value: good.toDouble(), color: primaryBlue, title: ''),
+          PieChartSectionData(value: bad.toDouble(), color: errorRed, title: ''),
         ],
       ),
     );
   }
 
-  // PRESETS
+  // ===== 오늘 통계 카드 (도넛 + 오른쪽 정렬 텍스트 한 줄) =====
+  Widget _buildTodayStatsCard() {
+    final total = _goodSecToday + _badSecToday;
+
+    return RectCard(
+      bgColor: headerGrey,
+      outlineColor: Colors.white.withOpacity(0.16),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const StatsPage()),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+        child: Row(
+          children: [
+            SizedBox(width: 110, height: 110, child: _miniTodayPie()),
+            const SizedBox(width: 28),
+            Expanded(
+              child: total == 0
+                  ? const Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  '오늘 데이터가 아직 없어요',
+                  style: TextStyle(color: Colors.white, fontSize: 13),
+                  textAlign: TextAlign.right,
+                ),
+              )
+                  : Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  _legendLine(errorRed, '잘못된 자세',
+                      _formatDurationKr(_badSecToday)),
+                  const SizedBox(height: 6),
+                  _legendLine(primaryBlue, '올바른 자세',
+                      _formatDurationKr(_goodSecToday)),
+                  const SizedBox(height: 8),
+                  _rightInfoLine('총 시간', _formatDurationKr(total)),
+                  const SizedBox(height: 2),
+                  const Text(
+                    '탭하면 자세한 통계로 이동',
+                    style: TextStyle(color: Colors.white, fontSize: 11),
+                    textAlign: TextAlign.right,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 아이콘 점 + 라벨/값 (오른쪽 정렬, 한 줄)
+  Widget _legendLine(Color dotColor, String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: dotColor,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          '$label : $value',
+          style: const TextStyle(color: Colors.white, fontSize: 13),
+          textAlign: TextAlign.right,
+          softWrap: false, // ← 줄바꿈 금지
+        ),
+      ],
+    );
+  }
+
+  // '총 시간: 7시간 10분' 한 줄
+  Widget _rightInfoLine(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        Text(
+          '$label: $value',
+          style: const TextStyle(color: Colors.white, fontSize: 12),
+          textAlign: TextAlign.right,
+          softWrap: false, // ← 줄바꿈 금지
+        ),
+      ],
+    );
+  }
+
   Widget _buildPresetArea() {
-    if (_presets.isEmpty) return _addPresetButton();
+    final items = _presets.take(3).toList();
+
+    if (items.isEmpty) return _addPresetCTA();
 
     return Row(
       children: [
-        ..._presets.map((entry) {
-          final presetName = entry['name'] ?? '이름 없음';
-          final presetId = entry['id'] ?? 0;
+        ...items.map((entry) {
+          final name = entry['name'] ?? '이름 없음';
+          final id = entry['id'] ?? 0;
           return Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: _presetButton(presetName, presetId),
+              child: _presetButton(name, id),
             ),
           );
-        }).toList(),
-        if (_presets.length < 3)
+        }),
+        if (items.length < 3)
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: _addPresetButton(),
+              child: _addPresetIconButton(),
             ),
           ),
       ],
     );
   }
 
-  Widget _addPresetButton() {
-    return InkWell(
+  Widget _addPresetCTA() {
+    return RectCard(
+      bgColor: headerGrey,
+      outlineColor: Colors.white.withOpacity(0.16),
+      elevated: true,
+      height: 56,
       onTap: _addPreset,
-      borderRadius: BorderRadius.circular(12),
-      splashColor: Colors.blue.withOpacity(0.3),
-      child: Container(
-        height: 56,
-        decoration: BoxDecoration(
-          color: cardGrey,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: primaryBlue, width: 1.3),
-        ),
-        child: const Center(
-          child: Icon(Icons.add_circle_outline, size: 26, color: Colors.white),
-        ),
+      child: const Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.add, size: 16, color: Colors.white70),
+          SizedBox(width: 8),
+          Text(
+            '프리셋 추가',
+            style:
+            TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _addPresetIconButton() {
+    return RectCard(
+      bgColor: headerGrey,
+      outlineColor: Colors.white.withOpacity(0.16),
+      elevated: true,
+      height: 56,
+      onTap: _addPreset,
+      child: const Center(
+        child: Icon(Icons.add, size: 18, color: Colors.white70),
       ),
     );
   }
 
   Widget _presetButton(String name, int presetId) {
-    return InkWell(
+    return RectCard(
+      bgColor: headerGrey,
+      outlineColor: Colors.white.withOpacity(0.16),
+      elevated: true,
+      height: 56,
       onTap: () => _handlePresetSelect(presetId),
-      borderRadius: BorderRadius.circular(12),
-      splashColor: Colors.white24,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        height: 56,
-        decoration: BoxDecoration(
-          color: primaryBlue,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: primaryBlue.withOpacity(0.35),
-              blurRadius: 5,
-              offset: const Offset(0, 3),
-            )
-          ],
-        ),
-        child: Center(
-          child: Text(
-            name,
-            style: const TextStyle(
-                color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600),
-          ),
+      child: Center(
+        child: Text(
+          name,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+              color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),
     );

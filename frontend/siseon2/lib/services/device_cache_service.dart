@@ -13,9 +13,8 @@ class DeviceCacheService {
 
   static Future<int?> _currentProfileId() async {
     final profile = await ProfileCacheService.loadProfile();
-    return profile?['id'] as int?;
+    return (profile?['profileId'] ?? profile?['id']) as int?;
   }
-
   // ── 서버에서 기기 조회 → 해당 프로필로 캐싱 ─────────────────────────────
   static Future<void> fetchAndCacheDevice({int? profileId}) async {
     final pid = profileId ?? await _currentProfileId();
@@ -107,8 +106,13 @@ class DeviceCacheService {
     if (serial == null || serial.toString().isEmpty) {
       throw ArgumentError('serial(혹은 serialNumber)이 없습니다.');
     }
-    await prefs.setString(_serialKey(profileId), serial.toString());
+    final s = serial.toString();
+    await prefs.setString(_serialKey(profileId), s);
     await prefs.setBool(_regKey(profileId), true);
+
+    // 🔁 레거시 키도 함께 세팅(다른 화면 호환)
+    await prefs.setString('deviceSerial', s);
+    await prefs.setBool('isDeviceRegistered', true);
   }
 
   static Future<Map<String, dynamic>?> loadDeviceForProfile(int profileId) async {

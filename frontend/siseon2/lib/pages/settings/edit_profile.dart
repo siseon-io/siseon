@@ -7,6 +7,17 @@ import '../../services/auth_service.dart';
 import '../../profile_select_screen.dart';
 import '../../services/profile_cache_service.dart';
 
+/// 🎨 공통 색상
+class AppColors {
+  static const background = Color(0xFF0D1117); // 전체 배경
+  static const card = Color(0xFF161B22);       // 카드/입력창 배경
+  static const border = Color(0xFF334155);     // 테두리
+  static const primary = Color(0xFF3B82F6);    // 포인트
+  static const text = Colors.white;
+  static const textSub = Colors.white70;
+  static const textHint = Colors.white38;
+}
+
 class EditProfilePage extends StatefulWidget {
   const EditProfilePage({Key? key}) : super(key: key);
 
@@ -55,8 +66,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
     try {
       final cached = await ProfileCacheService.loadProfile();
-      if (cached == null || cached['id'] == null)
-        return setState(() => _isLoading = false);
+      if (cached == null || cached['id'] == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
       final id = cached['id'];
 
       final res = await http.get(
@@ -75,7 +88,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
             _visionRightController.text = user['rightVision']?.toString() ?? '';
             if (user['birthDate'] != null) {
               _birthDate = DateTime.tryParse(user['birthDate']);
-              _birthDateController.text = DateFormat('yyyy-MM-dd').format(_birthDate!);
+              if (_birthDate != null) {
+                _birthDateController.text = DateFormat('yyyy-MM-dd').format(_birthDate!);
+              }
             }
             _selectedImage = user['imageUrl'];
           });
@@ -92,60 +107,55 @@ class _EditProfilePageState extends State<EditProfilePage> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.black,
+      backgroundColor: AppColors.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (_) {
         return Container(
-          height: 300,                // 고정 높이
+          height: 300,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Column(
             children: [
-              const Text('생년월일 선택', style: TextStyle(color: Colors.white, fontSize: 18)),
+              const Text('생년월일 선택',
+                  style: TextStyle(color: AppColors.text, fontSize: 18, fontWeight: FontWeight.w600)),
               const SizedBox(height: 12),
               Expanded(
                 child: Row(
                   children: [
                     Expanded(
                       child: CupertinoPicker(
-                        scrollController:
-                        FixedExtentScrollController(initialItem: selectedYear - 1900),
+                        scrollController: FixedExtentScrollController(initialItem: selectedYear - 1900),
                         itemExtent: 40,
                         onSelectedItemChanged: (i) => selectedYear = 1900 + i,
                         children: List.generate(
                           126,
-                              (i) => Center(
-                            child: Text('${1900 + i}년', style: const TextStyle(color: Colors.white)),
-                          ),
+                              (i) => const Center(child: Text('', style: TextStyle(color: AppColors.text)))
+                              .copyWithText('${1900 + i}년'),
                         ),
                       ),
                     ),
                     Expanded(
                       child: CupertinoPicker(
-                        scrollController:
-                        FixedExtentScrollController(initialItem: selectedMonth - 1),
+                        scrollController: FixedExtentScrollController(initialItem: selectedMonth - 1),
                         itemExtent: 40,
                         onSelectedItemChanged: (i) => selectedMonth = i + 1,
                         children: List.generate(
                           12,
-                              (i) => Center(
-                            child: Text('${i + 1}월', style: const TextStyle(color: Colors.white)),
-                          ),
+                              (i) => const Center(child: Text('', style: TextStyle(color: AppColors.text)))
+                              .copyWithText('${i + 1}월'),
                         ),
                       ),
                     ),
                     Expanded(
                       child: CupertinoPicker(
-                        scrollController:
-                        FixedExtentScrollController(initialItem: selectedDay - 1),
+                        scrollController: FixedExtentScrollController(initialItem: selectedDay - 1),
                         itemExtent: 40,
                         onSelectedItemChanged: (i) => selectedDay = i + 1,
                         children: List.generate(
                           31,
-                              (i) => Center(
-                            child: Text('${i + 1}일', style: const TextStyle(color: Colors.white)),
-                          ),
+                              (i) => const Center(child: Text('', style: TextStyle(color: AppColors.text)))
+                              .copyWithText('${i + 1}일'),
                         ),
                       ),
                     ),
@@ -157,13 +167,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   onPressed: () {
                     setState(() {
                       _birthDate = DateTime(selectedYear, selectedMonth, selectedDay);
-                      _birthDateController.text =
-                          DateFormat('yyyy-MM-dd').format(_birthDate!);
+                      _birthDateController.text = DateFormat('yyyy-MM-dd').format(_birthDate!);
                     });
                     Navigator.pop(context);
                   },
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3B82F6)),
-                  child: const Text('확인'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text('확인', style: TextStyle(color: Colors.white)),
                 ),
               ),
             ],
@@ -172,53 +184,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
       },
     );
   }
-  Widget _yearPicker(ValueChanged<int> onChanged, int init) =>
-      CupertinoPicker(
-        scrollController: FixedExtentScrollController(initialItem: init),
-        itemExtent: 40,
-        onSelectedItemChanged: onChanged,
-        children: List.generate(
-          126,
-              (i) => Center(
-            child: Text('${1900 + i}년',
-                style: const TextStyle(color: Colors.white)),
-          ),
-        ),
-      );
-
-  Widget _monthPicker(ValueChanged<int> onChanged, int init) =>
-      CupertinoPicker(
-        scrollController: FixedExtentScrollController(initialItem: init),
-        itemExtent: 40,
-        onSelectedItemChanged: onChanged,
-        children: List.generate(
-          12,
-              (i) => Center(
-            child: Text('${i + 1}월',
-                style: const TextStyle(color: Colors.white)),
-          ),
-        ),
-      );
-
-  Widget _dayPicker(ValueChanged<int> onChanged, int init) =>
-      CupertinoPicker(
-        scrollController: FixedExtentScrollController(initialItem: init),
-        itemExtent: 40,
-        onSelectedItemChanged: onChanged,
-        children: List.generate(
-          31,
-              (i) => Center(
-            child: Text('${i + 1}일',
-                style: const TextStyle(color: Colors.white)),
-          ),
-        ),
-      );
 
   void _showImagePicker() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: Colors.black,
+      backgroundColor: AppColors.card,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -237,7 +208,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                       fontFamily: 'Pretendard',
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: AppColors.text,
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -264,13 +235,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
                               Container(
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
-                                  border: isSel
-                                      ? Border.all(color: const Color(0xFF3B82F6), width: 3)
-                                      : null,
+                                  border: Border.all(
+                                    color: isSel ? AppColors.primary : Colors.transparent,
+                                    width: 3,
+                                  ),
                                 ),
                                 child: CircleAvatar(
                                   radius: 40,
-                                  backgroundColor: Colors.grey[900],
+                                  backgroundColor: const Color(0xFF1F2937),
                                   backgroundImage: path != null ? AssetImage(path) : null,
                                   child: path == null
                                       ? const Icon(Icons.person_off, size: 30, color: Colors.grey)
@@ -284,7 +256,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                                   path == null
                                       ? ''
                                       : _avatarNames[path.split('/').last.split('.').first] ?? '아바타',
-                                  style: const TextStyle(color: Colors.white70, fontSize: 13),
+                                  style: const TextStyle(color: AppColors.textSub, fontSize: 13),
                                   overflow: TextOverflow.ellipsis,
                                   textAlign: TextAlign.center,
                                 ),
@@ -303,7 +275,6 @@ class _EditProfilePageState extends State<EditProfilePage> {
       },
     );
   }
-
 
   Future<void> _save() async {
     final t = await AuthService.getValidAccessToken();
@@ -325,32 +296,89 @@ class _EditProfilePageState extends State<EditProfilePage> {
       body: body,
     );
     if (res.statusCode == 200 && mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('프로필이 저장되었습니다.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('프로필이 저장되었습니다.')));
       Navigator.pop(context);
     } else {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('수정 실패: ${res.statusCode}')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('수정 실패: ${res.statusCode}')));
     }
   }
 
+  // ✅ 삭제 다이얼로그: 왼쪽 빨간 '삭제', 오른쪽 '취소' (다른 곳과 통일)
   Future<void> _confirmDelete() async {
     final name = _nameController.text.isNotEmpty ? _nameController.text : '이';
     final ok = await showDialog<bool>(
-      context: context,  // ← 여기도 context
-      builder: (context) => AlertDialog(
-        title: const Text('프로필 삭제'),
-        content: Text('$name님의 프로필을 삭제하시겠습니까?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),  // ← context
-            child: const Text('예', style: TextStyle(color: Colors.red)),
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity(0.6),
+      builder: (_) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: AppColors.card,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '프로필 삭제',
+                style: TextStyle(
+                  color: AppColors.text,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  fontFamily: 'Pretendard',
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '$name님의 프로필을 삭제하시겠습니까?',
+                style: const TextStyle(color: AppColors.textSub, fontFamily: 'Pretendard'),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context, true),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text(
+                        '삭제',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          fontFamily: 'Pretendard',
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: AppColors.primary),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      child: const Text(
+                        '취소',
+                        style: TextStyle(
+                          color: AppColors.primary,
+                          fontSize: 16,
+                          fontFamily: 'Pretendard',
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, false), // ← context
-            child: const Text('아니오'),
-          ),
-        ],
+        ),
       ),
     );
     if (ok == true) {
@@ -366,27 +394,26 @@ class _EditProfilePageState extends State<EditProfilePage> {
       headers: {'Authorization': 'Bearer $t'},
     );
     if (res.statusCode == 204 && mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('프로필이 삭제되었습니다.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('프로필이 삭제되었습니다.')));
       Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => const ProfileSelectScreen()),
-              (r) => false);
+        context,
+        MaterialPageRoute(builder: (_) => const ProfileSelectScreen()),
+            (r) => false,
+      );
     } else {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('삭제 실패: ${res.statusCode}')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('삭제 실패: ${res.statusCode}')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: AppColors.background,
         elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text('프로필 수정', style: TextStyle(color: Colors.white)),
+        iconTheme: const IconThemeData(color: AppColors.text),
+        title: const Text('프로필 수정', style: TextStyle(color: AppColors.text)),
         actions: [
           TextButton(
             onPressed: _confirmDelete,
@@ -406,9 +433,8 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 onTap: _showImagePicker,
                 child: CircleAvatar(
                   radius: 48,
-                  backgroundColor: Colors.grey[700],
-                  backgroundImage:
-                  _selectedImage != null ? AssetImage(_selectedImage!) : null,
+                  backgroundColor: const Color(0xFF1F2937),
+                  backgroundImage: _selectedImage != null ? AssetImage(_selectedImage!) : null,
                   child: _selectedImage == null
                       ? const Icon(Icons.person, size: 50, color: Colors.white30)
                       : null,
@@ -416,13 +442,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
               ),
             ),
             const SizedBox(height: 16),
-            _buildField(
-              _nameController,
-              '이름',
-              '이름을 입력하세요',
-              Icons.person,
-              TextInputType.text,
-            ),
+            _buildField(_nameController, '이름', '이름을 입력하세요', Icons.person, TextInputType.text),
             const SizedBox(height: 16),
             _buildField(
               _heightController,
@@ -477,44 +497,66 @@ class _EditProfilePageState extends State<EditProfilePage> {
           child: ElevatedButton(
             onPressed: _isLoading ? null : _save,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF3B82F6),
+              backgroundColor: AppColors.primary,
               padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(30),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
               elevation: 0,
             ),
             child: const Text(
               '저장',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
             ),
           ),
         ),
       ),
     );
   }
-  Widget _buildField(TextEditingController c, String label, String hint,
-      IconData icon, TextInputType kt) =>
+
+  Widget _buildField(
+      TextEditingController c,
+      String label,
+      String hint,
+      IconData icon,
+      TextInputType kt,
+      ) =>
       TextField(
         controller: c,
-        style: const TextStyle(color: Colors.white),
+        style: const TextStyle(color: AppColors.text),
         keyboardType: kt,
         decoration: InputDecoration(
           filled: true,
-          fillColor: Colors.grey[900],
-          prefixIcon: Icon(icon, color: Colors.white70),
+          fillColor: AppColors.card,
+          prefixIcon: Icon(icon, color: AppColors.textSub),
           labelText: label,
-          labelStyle: const TextStyle(color: Colors.white70),
+          labelStyle: const TextStyle(color: AppColors.textSub),
           hintText: hint,
-          hintStyle: const TextStyle(color: Colors.white38),
+          hintStyle: const TextStyle(color: AppColors.textHint),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+          ),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
+            borderSide: const BorderSide(color: AppColors.border),
           ),
         ),
       );
+}
+
+/// 작은 헬퍼: Center(child: Text('')) 패턴에 텍스트만 쉽게 바꾸기
+extension _CopyWithText on Widget {
+  Widget copyWithText(String text) {
+    return Builder(builder: (_) {
+      if (this is Center && (this as Center).child is Text) {
+        final base = (this as Center);
+        final baseText = base.child as Text;
+        return Center(child: Text(text, style: baseText.style));
+      }
+      return this;
+    });
+  }
 }
