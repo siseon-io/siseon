@@ -1,0 +1,28 @@
+# Web framework
+fastapi>=0.100.0,<0.110.0
+uvicorn[standard]>=0.23.2
+
+# 설정 파일 & 환경변수
+python-dotenv==1.1.1
+python-jose==3.3.0
+PyYAML==6.0.2
+
+# HTTP client for LLM 호출
+requests==2.32.4
+
+# DB 드라이버
+pymysql>=1.1.0
+SQLAlchemy>=2.0.30
+
+# RAG용 벡터 스토어 & 임베딩
+faiss-cpu==1.11.0.post1
+sentence-transformers==5.0.0
+
+# LangChain core (+ 분리 패키지들)
+langchain==0.3.27
+langchain-community==0.3.27
+langchain-huggingface>=0.0.3
+langchain-text-splitters>=0.2.2
+
+# PDF 로딩
+pypdf==5.9.0
