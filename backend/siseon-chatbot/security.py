@@ -27,13 +27,13 @@ async def get_current_user(
     try:
         payload = jwt.decode(
             token,
-            JWT_SECRET_KEY_BYTES,
-            algorithms=[JWT_ALGORITHM],
-            issuer=JWT_ISSUER,
+            JWT_SECRET_KEY_BYTES,          # base64url 디코딩된 바이트 키 (스프링과 동일)
+            algorithms=[JWT_ALGORITHM],    # HS256
+            issuer=JWT_ISSUER,             # iss = "siseon"
             options={
-                "verify_aud": False,
-                "require_exp": True,
-                "require_iat": True,
+                "verify_aud": False,       # aud 미검증
+                "require_exp": True,       # exp 필수
+                "require_iat": True,       # iat 필수
             },
         )
     except ExpiredSignatureError:

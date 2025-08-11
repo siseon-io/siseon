@@ -40,21 +40,21 @@ def _get_int(name: str, default: int | None = None) -> int:
 # ──────────────────────────────────────────────────────────────────────────────
 OPENAI_API_KEY  = _get_required("OPENAI_API_KEY")
 OPENAI_API_BASE = _get_required("OPENAI_API_BASE")
-GMS_MODEL       = os.getenv("GMS_MODEL", "gpt-4.1")
-TEMPERATURE     = float(os.getenv("TEMPERATURE", "0.0"))
+GMS_MODEL       = os.getenv("GMS_MODEL")
+TEMPERATURE     = float(os.getenv("TEMPERATURE"))
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Manual
 # ──────────────────────────────────────────────────────────────────────────────
-MANUAL_PATH = os.getenv("MANUAL_PATH", "/app/manuals/siseon_manual.pdf")
+MANUAL_PATH = os.getenv("MANUAL_PATH")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Database
 # ──────────────────────────────────────────────────────────────────────────────
 DB_HOST     = _get_required("DB_HOST")
-DB_PORT     = _get_int("DB_PORT", 3306)
+DB_PORT     = _get_int("DB_PORT")
 DB_USER     = _get_required("DB_USER")
 DB_PASSWORD = _get_required("DB_PASSWORD")
 DB_NAME     = _get_required("DB_NAME")
@@ -63,7 +63,7 @@ DB_NAME     = _get_required("DB_NAME")
 # ──────────────────────────────────────────────────────────────────────────────
 # Spring Base (선택)
 # ──────────────────────────────────────────────────────────────────────────────
-SPRING_BASE_URL = os.getenv("SPRING_BASE_URL")
+SPRING_BASE_URL = os.getenv("SPRING_BASE_URL", "http://i13b101.p.ssafy.io:8080")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -73,10 +73,11 @@ SPRING_BASE_URL = os.getenv("SPRING_BASE_URL")
 # ──────────────────────────────────────────────────────────────────────────────
 # ※ 기존 ALGORITHM 변수명 사용하던 코드 호환 위해 여전히 읽긴 하되,
 #   새 변수(JWT_ALGORITHM)를 우선한다.
-JWT_ALGORITHM = os.getenv("JWT_ALGORITHM")
-JWT_ISSUER    = os.getenv("JWT_ISSUER")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM") or os.getenv("ALGORITHM") or "HS256"
+JWT_ISSUER    = os.getenv("JWT_ISSUER", "siseon")
 
 # Spring과 공유되는 base64url secret 문자열 (그대로 전달됨)
+# 예: c2lzZW9uLW1vbml0b3ItYXJtLXNlcnZpY2Utc2VjcmV0LXYx
 JWT_SECRET_KEY_B64URL = _get_required("JWT_SECRET_KEY")
 
 # FastAPI 검증용: base64url → bytes
