@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(eye_pos_node)
+project(eye_pose_node)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -26,27 +26,26 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/websocketpp
 )
 
-add_executable(eye_pos_node src/eye_pos_node.cpp)
-ament_target_dependencies(eye_pos_node
+add_executable(eye_pose_node src/eye_pose_node.cpp)
+ament_target_dependencies(eye_pose_node
   rclcpp
   std_msgs
   geometry_msgs
 )
 
 # Include directories for Asio and websocketpp
-target_include_directories(eye_pos_node PRIVATE
+target_include_directories(eye_pose_node PRIVATE
   ${ASIO_INCLUDE_DIRS}
   ${PROJECT_SOURCE_DIR}/websocketpp
 )
 
 # Link header-only libraries (no PRIVATE keyword to match ament_target_dependencies signature)
-target_link_libraries(eye_pos_node
-  CURL::libcurl
+target_link_libraries(eye_pose_node
   PkgConfig::ASIO
   nlohmann_json::nlohmann_json
 )
 
-install(TARGETS eye_pos_node
+install(TARGETS eye_pose_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

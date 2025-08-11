@@ -63,7 +63,7 @@ public:
     void message_arrived(mqtt::const_message_ptr msg) override {
         auto topic   = msg->get_topic();
         auto payload = msg->to_string();
-        RCLCPP_INFO(get_logger(), "MQTT 수신: topic=%s payload=%s", topic.c_str(), payload.c_str());
+        // RCLCPP_INFO(get_logger(), "MQTT 수신: topic=%s payload=%s", topic.c_str(), payload.c_str());
 
         // 페어링 요청이 오면 BLE 광고 시작
         if (topic == topicRequest_ && !pairingRequested_) {
@@ -72,13 +72,13 @@ public:
                 json j = json::parse(payload);
                 if (j.contains("profile_id")) {
                     std::string profileId = j["profile_id"];
-                    RCLCPP_INFO(get_logger(), "📋 Profile ID 수신: %s", profileId.c_str());
+                    // RCLCPP_INFO(get_logger(), "📋 Profile ID 수신: %s", profileId.c_str());
                     currentProfileId_ = profileId;
                 } else {
-                    RCLCPP_WARN(get_logger(), "⚠️ JSON에 profile_id 필드가 없습니다");
+                    // RCLCPP_WARN(get_logger(), "⚠️ JSON에 profile_id 필드가 없습니다");
                 }
             } catch (const json::exception& e) {
-                RCLCPP_WARN(get_logger(), "⚠️ JSON 파싱 실패, 일반 페어링 요청으로 처리: %s", e.what());
+                // RCLCPP_WARN(get_logger(), "⚠️ JSON 파싱 실패, 일반 페어링 요청으로 처리: %s", e.what());
             }
             
             RCLCPP_INFO(get_logger(), "🛎 페어링 요청 수신 → BLE 광고 시작");
@@ -114,7 +114,7 @@ private:
            .onInterface("org.bluez.AgentManager1")
            .withArguments(sdbus::ObjectPath("/pairing_agent"));
 
-        RCLCPP_INFO(get_logger(), "Just-Works 에이전트 등록 완료");
+        // RCLCPP_INFO(get_logger(), "Just-Works 에이전트 등록 완료");
     }
 
     // 어댑터 Discoverable/Pairable 모드로 설정
@@ -139,7 +139,7 @@ private:
             if constexpr(std::is_same_v<T, std::string>) out = v;
             else out = static_cast<T>(std::stoi(v));
         } else if (required) {
-            RCLCPP_FATAL(get_logger(), "%s 환경변수를 설정하세요.", key);
+            // RCLCPP_FATAL(get_logger(), "%s 환경변수를 설정하세요.", key);
             throw std::runtime_error("Missing " + std::string(key));
         } else {
             out = def;
@@ -164,7 +164,7 @@ private:
         std::string address =
             (proto_ == "mqtt" || proto_ == "tcp" ? "tcp://" : "ssl://") +
             mqttHost_ + ":" + std::to_string(mqttPort_);
-        RCLCPP_INFO(get_logger(), "🔗 MQTT broker: %s", address.c_str());
+        // RCLCPP_INFO(get_logger(), "🔗 MQTT broker: %s", address.c_str());
 
         client_ = std::make_unique<mqtt::async_client>(address, "pairing_bridge_node");
         client_->set_callback(*this);
@@ -172,10 +172,10 @@ private:
         auto sslb = mqtt::ssl_options_builder();
         if (!sslCaPath_.empty()) {
             sslb.trust_store(sslCaPath_).enable_server_cert_auth(true);
-            RCLCPP_INFO(get_logger(), "🔒 CA cert: %s", sslCaPath_.c_str());
+            // RCLCPP_INFO(get_logger(), "🔒 CA cert: %s", sslCaPath_.c_str());
         } else {
             sslb.enable_server_cert_auth(false);
-            RCLCPP_WARN(get_logger(), "⚠️ MQTT_CA_CERT 미설정: 서버 인증서 검증 OFF");
+            // RCLCPP_WARN(get_logger(), "⚠️ MQTT_CA_CERT 미설정: 서버 인증서 검증 OFF");
         }
         sslOpts_ = sslb.finalize();
 
@@ -189,13 +189,13 @@ private:
                         .finalize();
 
         try {
-            RCLCPP_INFO(get_logger(), "🔄 MQTT 연결 시도…");
+            // RCLCPP_INFO(get_logger(), "🔄 MQTT 연결 시도…");
             client_->connect(connOpts_)->wait();
-            RCLCPP_INFO(get_logger(), "✅ MQTT 연결 성공");
+            // RCLCPP_INFO(get_logger(), "✅ MQTT 연결 성공");
             client_->subscribe(topicRequest_, QOS)->wait();
-            RCLCPP_INFO(get_logger(), "📡 구독: %s", topicRequest_.c_str());
+            // RCLCPP_INFO(get_logger(), "📡 구독: %s", topicRequest_.c_str());
         } catch (const mqtt::exception &e) {
-            RCLCPP_ERROR(get_logger(), "❌ MQTT 연결/구독 실패: %s", e.what());
+            // RCLCPP_ERROR(get_logger(), "❌ MQTT 연결/구독 실패: %s", e.what());
             throw;
         }
     }
@@ -234,7 +234,7 @@ private:
                               std::map<std::string,sdbus::Variant>{});
             RCLCPP_INFO(get_logger(), "📡 BLE Advertising 등록 완료");
         } catch (const sdbus::Error &e) {
-            RCLCPP_WARN(get_logger(), "⚠️ 광고 등록 실패: %s", e.what());
+            // RCLCPP_WARN(get_logger(), "⚠️ 광고 등록 실패: %s", e.what());
         }
     }
 
@@ -261,7 +261,7 @@ private:
         constexpr char CMD[] = "hcitool con | grep 'ACL' | awk '{print $3}'";
         FILE* pipe = popen(CMD, "r");
         if (!pipe) {
-            RCLCPP_ERROR(get_logger(), "popen() 실패");
+            // RCLCPP_ERROR(get_logger(), "popen() 실패");
             return;
         }
 
@@ -294,7 +294,7 @@ private:
             std_msgs::msg::String msg;
             msg.data = mac;
             pub_->publish(msg);
-            RCLCPP_INFO(get_logger(), "MAC 주소 Published: %s", msg.data.c_str());
+            // RCLCPP_INFO(get_logger(), "MAC 주소 Published: %s", msg.data.c_str());
 
             break;
         }

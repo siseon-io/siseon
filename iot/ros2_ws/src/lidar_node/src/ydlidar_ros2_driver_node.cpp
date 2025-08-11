@@ -37,7 +37,7 @@ int main(int argc, char *argv[]) {
 
   auto node = rclcpp::Node::make_shared("ydlidar_ros2_driver_node");
 
-  RCLCPP_INFO(node->get_logger(), "[YDLIDAR INFO] Current ROS Driver Version: %s\n", ((std::string)ROS2Verision).c_str());
+  // RCLCPP_INFO(node->get_logger(), "[YDLIDAR INFO] Current ROS Driver Version: %s\n", ((std::string)ROS2Verision).c_str());
 
   CYdLidar laser;
   std::string str_optvalue = "/dev/ttyUSB0";
@@ -181,7 +181,7 @@ int main(int argc, char *argv[]) {
   } 
   else 
   {
-    RCLCPP_ERROR(node->get_logger(), "%s\n", laser.DescribeError());
+    // RCLCPP_ERROR(node->get_logger(), "%s\n", laser.DescribeError());
   }
   
   auto laser_pub = node->create_publisher<sensor_msgs::msg::LaserScan>("scan", rclcpp::SensorDataQoS());
@@ -266,7 +266,7 @@ int main(int argc, char *argv[]) {
       pc_pub->publish(*pc_msg);
 
     } else {
-      RCLCPP_ERROR(node->get_logger(), "Failed to get scan");
+      // RCLCPP_ERROR(node->get_logger(), "Failed to get scan");
     }
     if(!rclcpp::ok()) {
       break;
@@ -276,7 +276,7 @@ int main(int argc, char *argv[]) {
   }
 
 
-  RCLCPP_INFO(node->get_logger(), "[YDLIDAR INFO] Now YDLIDAR is stopping .......");
+  // RCLCPP_INFO(node->get_logger(), "[YDLIDAR INFO] Now YDLIDAR is stopping .......");
   laser.turnOff();
   laser.disconnecting();
   rclcpp::shutdown();
