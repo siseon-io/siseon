@@ -791,7 +791,10 @@ class HomeScreenState extends State<HomeScreen> {
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
         child: Row(
           children: [
-            SizedBox(width: 110, height: 110, child: _miniTodayPie()),
+            Padding(
+              padding: const EdgeInsets.only(left: 20), // ← 여기 숫자만 조절하면 됨
+              child: SizedBox(width: 110, height: 110, child: _miniTodayPie()),
+            ),
             const SizedBox(width: 28),
             Expanded(
               child: total == 0
