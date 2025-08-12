@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart'; // rootBundle, InputFormatters
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import '../services/auth_service.dart';
@@ -24,34 +25,71 @@ class ProfileCreateScreen extends StatefulWidget {
 }
 
 class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
-  String? _selectedAvatar;
+  String? _selectedAvatar; // asset path (또는 null)
   String _name = '';
   String _height = '';
   DateTime? _birthDate;
   String _visionLeft = '';
   String _visionRight = '';
 
-  final Map<String, String> _avatarNames = {
-    'profile_frog': '개구리',
-    'profile_cat': '고양이',
-    'profile_dog': '강아지',
-    'profile_lion': '사자',
-    'profile_mouse': '쥐',
-    'profile_rabbit': '토끼',
-  };
+  // ✅ 아바타 자산 자동 로딩 (assets/images/avatars/*)
+  List<String> _avatarAssets = [];
+  bool _avatarsLoaded = false;
 
-  final List<String?> _avatarOptions = [
-    null,
-    'assets/images/profile_frog.png',
-    'assets/images/profile_cat.png',
-    'assets/images/profile_dog.png',
-    'assets/images/profile_lion.png',
-    'assets/images/profile_mouse.png',
-    'assets/images/profile_rabbit.png',
+  // 폴백(예전 이미지 셋) — avatars 폴더가 비어있을 때만 사용
+  static const List<String> _fallbackAvatars = [
+    'assets/images/profile_blueman.png',
+    'assets/images/profile_glassblueman.png',
+    'assets/images/profile_purpleman.png',
+    'assets/images/profile_purplegirl.png',
+    'assets/images/profile_lightblueman.png',
+    'assets/images/profile_circlepurplegirl.png',
+    'assets/images/profile_lightpurplegirl.png',
+    'assets/images/profile_bluegirl.png',
   ];
 
+  @override
+  void initState() {
+    super.initState();
+    _loadAvatarAssets();
+  }
+
+  Future<void> _loadAvatarAssets() async {
+    try {
+      final manifestJson = await rootBundle.loadString('AssetManifest.json');
+      final Map<String, dynamic> manifest = jsonDecode(manifestJson);
+
+      // assets/images/avatars/ 아래의 이미지 파일 자동 수집
+      final candidates = manifest.keys.where((k) {
+        final lower = k.toLowerCase();
+        final isUnderAvatars = lower.startsWith('assets/images/avatars/');
+        final isImage = lower.endsWith('.png') ||
+            lower.endsWith('.jpg') ||
+            lower.endsWith('.jpeg') ||
+            lower.endsWith('.webp');
+        return isUnderAvatars && isImage;
+      }).toList()
+        ..sort();
+
+      setState(() {
+        _avatarAssets = candidates.isNotEmpty ? candidates : _fallbackAvatars;
+        _avatarsLoaded = true;
+      });
+    } catch (_) {
+      // manifest 읽기 실패 시 폴백 사용
+      setState(() {
+        _avatarAssets = _fallbackAvatars;
+        _avatarsLoaded = true;
+      });
+    }
+  }
+
   void _pickDate() {
-    int selectedYear = _birthDate?.year ?? 2000;
+    final now = DateTime.now();
+    const startYear = 1900;
+    final endYear = now.year;
+
+    int selectedYear = _birthDate?.year.clamp(startYear, endYear) ?? 2000;
     int selectedMonth = _birthDate?.month ?? 1;
     int selectedDay = _birthDate?.day ?? 1;
 
@@ -67,77 +105,131 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
           padding: MediaQuery.of(context).viewInsets,
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  '생년월일 선택',
-                  style: TextStyle(color: AppColors.text, fontSize: 18, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 200,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: CupertinoPicker(
-                          scrollController: FixedExtentScrollController(initialItem: selectedYear - 1900),
-                          itemExtent: 40,
-                          onSelectedItemChanged: (index) => selectedYear = 1900 + index,
-                          children: List.generate(
-                            126,
-                                (i) => Center(
-                              child: Text('${1900 + i}년', style: const TextStyle(color: AppColors.text)),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: CupertinoPicker(
-                          scrollController: FixedExtentScrollController(initialItem: selectedMonth - 1),
-                          itemExtent: 40,
-                          onSelectedItemChanged: (index) => selectedMonth = index + 1,
-                          children: List.generate(
-                            12,
-                                (i) => Center(
-                              child: Text('${i + 1}월', style: const TextStyle(color: AppColors.text)),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        child: CupertinoPicker(
-                          scrollController: FixedExtentScrollController(initialItem: selectedDay - 1),
-                          itemExtent: 40,
-                          onSelectedItemChanged: (index) => selectedDay = index + 1,
-                          children: List.generate(
-                            31,
-                                (i) => Center(
-                              child: Text('${i + 1}일', style: const TextStyle(color: AppColors.text)),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                SafeArea(
-                  child: ElevatedButton(
-                    onPressed: () {
-                      setState(() {
-                        _birthDate = DateTime(selectedYear, selectedMonth, selectedDay);
-                      });
-                      Navigator.pop(context);
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: StatefulBuilder(
+              builder: (ctx, setModalState) {
+                final yearCount = endYear - startYear + 1;
+                final daysInMonth = DateTime(
+                    selectedMonth == 12 ? selectedYear + 1 : selectedYear,
+                    selectedMonth == 12 ? 1 : selectedMonth + 1,
+                    0)
+                    .day;
+                if (selectedDay > daysInMonth) {
+                  selectedDay = daysInMonth;
+                }
+
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      '생년월일 선택',
+                      style: TextStyle(
+                          color: AppColors.text,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600),
                     ),
-                    child: const Text('확인', style: TextStyle(color: Colors.white)),
-                  ),
-                ),
-              ],
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 200,
+                      child: Row(
+                        children: [
+                          // Year
+                          Expanded(
+                            child: CupertinoPicker(
+                              scrollController: FixedExtentScrollController(
+                                initialItem:
+                                (selectedYear - startYear).clamp(0, yearCount - 1),
+                              ),
+                              itemExtent: 40,
+                              onSelectedItemChanged: (index) {
+                                setModalState(() {
+                                  selectedYear = startYear + index;
+                                });
+                              },
+                              children: List.generate(
+                                yearCount,
+                                    (i) => Center(
+                                  child: Text(
+                                    '${startYear + i}년',
+                                    style:
+                                    const TextStyle(color: AppColors.text),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Month
+                          Expanded(
+                            child: CupertinoPicker(
+                              scrollController: FixedExtentScrollController(
+                                initialItem: selectedMonth - 1,
+                              ),
+                              itemExtent: 40,
+                              onSelectedItemChanged: (index) {
+                                setModalState(() {
+                                  selectedMonth = index + 1;
+                                });
+                              },
+                              children: List.generate(
+                                12,
+                                    (i) => Center(
+                                  child: Text(
+                                    '${i + 1}월',
+                                    style:
+                                    const TextStyle(color: AppColors.text),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Day (1~해당 월의 일수)
+                          Expanded(
+                            child: CupertinoPicker(
+                              scrollController: FixedExtentScrollController(
+                                  initialItem: (selectedDay - 1)
+                                      .clamp(0, daysInMonth - 1)),
+                              itemExtent: 40,
+                              onSelectedItemChanged: (index) {
+                                setModalState(() {
+                                  selectedDay = index + 1;
+                                });
+                              },
+                              children: List.generate(
+                                daysInMonth,
+                                    (i) => Center(
+                                  child: Text(
+                                    '${i + 1}일',
+                                    style:
+                                    const TextStyle(color: AppColors.text),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SafeArea(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            _birthDate =
+                                DateTime(selectedYear, selectedMonth, selectedDay);
+                          });
+                          Navigator.pop(context);
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                        child: const Text('확인',
+                            style: TextStyle(color: Colors.white)),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         );
@@ -146,6 +238,8 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
   }
 
   void _showAvatarPicker() {
+    if (!_avatarsLoaded) return;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.card,
@@ -155,7 +249,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
       builder: (ctx) {
         return Container(
           padding: const EdgeInsets.all(20),
-          height: 360,
+          height: 380,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -177,9 +271,11 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                     crossAxisSpacing: 16,
                     mainAxisSpacing: 16,
                   ),
-                  itemCount: _avatarOptions.length,
+                  // 첫 칸은 "없음(null)" 옵션
+                  itemCount: 1 + _avatarAssets.length,
                   itemBuilder: (context, index) {
-                    final path = _avatarOptions[index];
+                    final String? path =
+                    (index == 0) ? null : _avatarAssets[index - 1];
                     final isSelected = path == _selectedAvatar;
 
                     return GestureDetector(
@@ -194,29 +290,29 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: isSelected ? AppColors.primary : AppColors.border,
+                                color:
+                                isSelected ? AppColors.primary : AppColors.border,
                                 width: isSelected ? 3 : 1,
                               ),
                             ),
                             child: CircleAvatar(
                               radius: 40,
                               backgroundColor: const Color(0xFF1F2937),
-                              backgroundImage: path != null ? AssetImage(path) : null,
+                              backgroundImage:
+                              path != null ? AssetImage(path) : null,
                               child: path == null
-                                  ? const Icon(Icons.person_off, size: 30, color: Colors.grey)
+                                  ? const Icon(Icons.person_off,
+                                  size: 30, color: Colors.grey)
                                   : null,
                             ),
                           ),
                           const SizedBox(height: 6),
-                          Flexible(
+                          const SizedBox(
+                            height: 16,
                             child: Text(
-                              path == null
-                                  ? ''
-                                  : _avatarNames[path.split('/').last.split('.').first] ?? '아바타',
-                              style: const TextStyle(color: AppColors.textSub, fontSize: 13),
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
-                              textAlign: TextAlign.center,
+                              '',
+                              style: TextStyle(
+                                  color: AppColors.textSub, fontSize: 13),
                             ),
                           ),
                         ],
@@ -242,7 +338,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
     }
 
     final response = await http.post(
-      Uri.parse('http://i13b101.p.ssafy.io:8080/api/profile'),
+      Uri.parse('https://i13b101.p.ssafy.io/siseon/api/profile'),
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $token',
@@ -253,15 +349,17 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
         "birthDate": _birthDate?.toIso8601String(),
         "leftVision": double.tryParse(_visionLeft),
         "rightVision": double.tryParse(_visionRight),
+        // 서버가 실제 URL을 요구한다면, 에셋 경로 대신 별도 키를 보내거나
+        // 업로드 후 URL을 보내도록 백엔드와 합의 필요
         "imageUrl": _selectedAvatar,
       }),
     );
 
+    if (!mounted) return;
+
     if (response.statusCode == 200 || response.statusCode == 201) {
-      if (!mounted) return;
       Navigator.pop(context, true);
     } else {
-      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('생성 실패: ${response.statusCode}')),
       );
@@ -285,15 +383,32 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
           children: [
             Center(
               child: InkWell(
-                onTap: _showAvatarPicker,
+                onTap: _avatarsLoaded ? _showAvatarPicker : null,
                 borderRadius: BorderRadius.circular(64),
-                child: CircleAvatar(
-                  radius: 50,
-                  backgroundColor: const Color(0xFF1F2937),
-                  backgroundImage: _selectedAvatar != null ? AssetImage(_selectedAvatar!) : null,
-                  child: _selectedAvatar == null
-                      ? const Icon(Icons.person, size: 50, color: Colors.white30)
-                      : null,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    CircleAvatar(
+                      radius: 50,
+                      backgroundColor: const Color(0xFF1F2937),
+                      backgroundImage: _selectedAvatar != null
+                          ? AssetImage(_selectedAvatar!)
+                          : null,
+                      child: _selectedAvatar == null
+                          ? const Icon(Icons.person,
+                          size: 50, color: Colors.white30)
+                          : null,
+                    ),
+                    if (!_avatarsLoaded)
+                      const SizedBox(
+                        width: 100,
+                        height: 100,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -312,6 +427,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
               icon: Icons.straighten,
               keyboardType: TextInputType.number,
               onChanged: (v) => setState(() => _height = v),
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
             ),
             const SizedBox(height: 16),
             GestureDetector(
@@ -319,10 +435,12 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('생년월일', style: TextStyle(color: AppColors.textSub, fontSize: 12)),
+                  const Text('생년월일',
+                      style: TextStyle(color: AppColors.textSub, fontSize: 12)),
                   const SizedBox(height: 6),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
+                    padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
                     decoration: BoxDecoration(
                       color: AppColors.card,
                       borderRadius: BorderRadius.circular(12),
@@ -330,14 +448,16 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.calendar_today, color: AppColors.textSub),
+                        const Icon(Icons.calendar_today,
+                            color: AppColors.textSub),
                         const SizedBox(width: 12),
                         Text(
                           _birthDate == null
                               ? '생년월일 선택'
                               : DateFormat('yyyy-MM-dd').format(_birthDate!),
                           style: TextStyle(
-                            color: _birthDate == null ? AppColors.textHint : AppColors.text,
+                            color:
+                            _birthDate == null ? AppColors.textHint : AppColors.text,
                             fontSize: 16,
                           ),
                         ),
@@ -355,8 +475,12 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                     label: '좌안 시력',
                     hint: '예: 1.0',
                     icon: Icons.visibility,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                     onChanged: (v) => setState(() => _visionLeft = v),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -365,8 +489,12 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                     label: '우안 시력',
                     hint: '예: 1.0',
                     icon: Icons.visibility,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
                     onChanged: (v) => setState(() => _visionRight = v),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    ],
                   ),
                 ),
               ],
@@ -408,10 +536,12 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
     required IconData icon,
     required TextInputType keyboardType,
     required ValueChanged<String> onChanged,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return TextField(
       style: const TextStyle(color: AppColors.text),
       keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(
         filled: true,
         fillColor: AppColors.card,

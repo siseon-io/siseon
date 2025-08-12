@@ -1,5 +1,6 @@
 // lib/pages/chat/chatbot_page.dart
 import 'dart:async'; // ✅ 점 애니메이션용
+import 'dart:convert'; // ✅ AssetManifest 파싱
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
@@ -27,6 +28,9 @@ class _ChatbotPageState extends State<ChatbotPage> {
   static const String assistantDisplayName = 'SEONY';
   static const double avatarSize = 32;
 
+  static const double assistantAvatarSize = 46; // SEONY
+  static const double userAvatarSize = 40;      // 사용자
+
   // STATE
   final List<ChatMessage> _messages = [];
   final TextEditingController _controller = TextEditingController();
@@ -44,6 +48,7 @@ class _ChatbotPageState extends State<ChatbotPage> {
   int _typingDir = 1;  // 1이면 증가, -1이면 감소
 
   ImageProvider? _userAvatar;
+  ImageProvider? _assistantAvatarImg; // ✅ SEONY 프로필 이미지
 
   // TIME
   DateTime nowKstLocal() {
@@ -60,6 +65,7 @@ class _ChatbotPageState extends State<ChatbotPage> {
   @override
   void initState() {
     super.initState();
+    _loadAssistantAvatar(); // ✅ SEONY 아바타 로드
     _loadUserAvatar();
     _loadHistory();
   }
@@ -70,6 +76,40 @@ class _ChatbotPageState extends State<ChatbotPage> {
     _controller.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadAssistantAvatar() async {
+    try {
+      // AssetManifest에서 chatbot_profile.* 검색 (png/webp/jpg/jpeg/gif)
+      final manifestJson = await rootBundle.loadString('AssetManifest.json');
+      final Map<String, dynamic> manifest = jsonDecode(manifestJson);
+
+      final exts = ['png', 'webp', 'jpg', 'jpeg', 'gif'];
+      String? found;
+
+      // 우선순위: assets/images/chatbot_profile.<ext>
+      for (final ext in exts) {
+        final cand = 'assets/images/chatbot_profile.$ext';
+        if (manifest.keys.contains(cand)) {
+          found = cand;
+          break;
+        }
+      }
+      // 혹시 다른 하위 폴더/이름 변형이 있을 경우 여유 검색
+      found ??= manifest.keys.firstWhere(
+            (k) => k.toLowerCase().contains('assets/images/') &&
+            k.toLowerCase().contains('chatbot_profile'),
+        orElse: () => '',
+      );
+      if (found != null && found.isNotEmpty) {
+        setState(() => _assistantAvatarImg = AssetImage(found!));
+      } else {
+        // 없으면 임시 플레이스홀더(파란 원+S)
+        setState(() => _assistantAvatarImg = null);
+      }
+    } catch (_) {
+      setState(() => _assistantAvatarImg = null);
+    }
   }
 
   Future<void> _loadUserAvatar() async {
@@ -267,7 +307,11 @@ class _ChatbotPageState extends State<ChatbotPage> {
                           Padding(padding: const EdgeInsets.only(top: 2), child: _userAvatarWidget()),
                         ]
                             : [
-                          Padding(padding: const EdgeInsets.only(top: 2), child: _assistantAvatar()),
+                          // ✅ 챗봇 아바타만 살짝 위로 올림 (-4px)
+                          Transform.translate(
+                            offset: const Offset(0, -6),
+                            child: _assistantAvatar(),
+                          ),
                           const SizedBox(width: 6),
                           Flexible(child: bubble),
                         ],
@@ -335,13 +379,24 @@ class _ChatbotPageState extends State<ChatbotPage> {
     );
   }
 
+  // ✅ SEONY 아바타: chatbot_profile 이미지 사용
   Widget _assistantAvatar() {
-    return Container(
-      width: avatarSize,
-      height: avatarSize,
-      decoration: const BoxDecoration(color: primaryBlue, shape: BoxShape.circle),
-      alignment: Alignment.center,
-      child: const Text('S', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+    if (_assistantAvatarImg == null) {
+      return Container(
+        width: assistantAvatarSize,
+        height: assistantAvatarSize,
+        decoration: const BoxDecoration(color: primaryBlue, shape: BoxShape.circle),
+        alignment: Alignment.center,
+        child: const Text(
+          'S',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 20), // 글자도 키움
+        ),
+      );
+    }
+    return CircleAvatar(
+      radius: assistantAvatarSize / 2,
+      backgroundImage: _assistantAvatarImg,
+      backgroundColor: Colors.transparent,
     );
   }
 

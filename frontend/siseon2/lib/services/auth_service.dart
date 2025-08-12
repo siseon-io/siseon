@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:jwt_decoder/jwt_decoder.dart';
 
 class AuthService {
-  static const String _baseUrl = 'http://i13b101.p.ssafy.io:8080';
+  static const String _baseUrl = 'https://i13b101.p.ssafy.io/siseon';
   static const String _refreshEndpoint = '$_baseUrl/api/auth/refresh';
 
   static const _kAccess = 'accessToken';

@@ -403,7 +403,7 @@ class HomeScreenState extends State<HomeScreen> {
     try {
       final token = await AuthService.getValidAccessToken();
       await http.post(
-        Uri.parse('http://i13b101.p.ssafy.io:8080/api/preset-coordinate'),
+        Uri.parse('https://i13b101.p.ssafy.io/siseon/api/preset-coordinate'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',

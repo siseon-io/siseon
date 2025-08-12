@@ -18,7 +18,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   /// Google accessToken을 백엔드에 전송
   Future<void> sendAccessTokenToBackend(String accessToken) async {
-    final url = Uri.parse('http://i13b101.p.ssafy.io:8080/api/auth/google');
+    final url = Uri.parse('https://i13b101.p.ssafy.io/siseon/api/auth/google');
     final headers = {'Content-Type': 'application/json'};
     final body = jsonEncode({'accessToken': accessToken});
 

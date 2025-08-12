@@ -60,7 +60,7 @@ class _DeviceRegisterPageState extends State<DeviceRegisterPage> {
 
       // 서버 등록
       final res = await http.post(
-        Uri.parse('http://i13b101.p.ssafy.io:8080/api/device'),
+        Uri.parse('https://i13b101.p.ssafy.io/siseon/api/device'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',

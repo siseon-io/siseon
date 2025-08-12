@@ -69,7 +69,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
     try {
       final response = await http.get(
-        Uri.parse('http://i13b101.p.ssafy.io:8080/api/profile'),
+        Uri.parse('https://i13b101.p.ssafy.io/siseon/api/profile'),
         headers: {'Authorization': 'Bearer $token'},
       );
 
@@ -106,7 +106,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
     try {
       final uri = Uri.parse(
-        'http://i13b101.p.ssafy.io:8080/api/push/unregister?profileId=$_selectedProfileId',
+        'https://i13b101.p.ssafy.io/siseon/api/push/unregister?profileId=$_selectedProfileId',
       );
 
       final response = await http.post(
@@ -131,7 +131,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
     try {
       final response = await http.delete(
-        Uri.parse('http://i13b101.p.ssafy.io:8080/api/user'),
+        Uri.parse('https://i13b101.p.ssafy.io/siseon/api/user'),
         headers: {'Authorization': 'Bearer $token'},
       );
 

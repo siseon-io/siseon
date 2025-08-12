@@ -50,7 +50,7 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
         try {
           final token = await AuthService.getValidAccessToken();
           final res = await http.get(
-            Uri.parse('http://i13b101.p.ssafy.io:8080/api/device/profile/$pid'),
+            Uri.parse('https://i13b101.p.ssafy.io/siseon/api/device/profile/$pid'),
             headers: {
               'Authorization': 'Bearer $token',
               'Accept': 'application/json',
@@ -142,7 +142,7 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
     try {
       final token = await AuthService.getValidAccessToken();
       final res = await http.delete(
-        Uri.parse('http://i13b101.p.ssafy.io:8080/api/device/profile/${_profileIdSafe!}'),
+        Uri.parse('https://i13b101.p.ssafy.io/siseon/api/device/profile/${_profileIdSafe!}'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',

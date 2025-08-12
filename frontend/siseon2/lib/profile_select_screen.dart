@@ -53,7 +53,7 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
     }
     try {
       final res = await http.get(
-        Uri.parse('http://i13b101.p.ssafy.io:8080/api/profile'),
+        Uri.parse('https://i13b101.p.ssafy.io/siseon/api/profile'),
         headers: {'Authorization': 'Bearer $token'},
       );
       if (!mounted) return;
@@ -114,7 +114,7 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
     if (pid != null && auth != null && fcm != null) {
       unawaited(http.post(
         Uri.parse(
-            'http://i13b101.p.ssafy.io:8080/api/push/register?profileId=$pid&fcmToken=$fcm'),
+            'https://i13b101.p.ssafy.io/siseon/api/push/register?profileId=$pid&fcmToken=$fcm'),
         headers: {'Authorization': 'Bearer $auth'},
       ));
     }
