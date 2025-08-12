@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:siseon2/services/profile_cache_service.dart';
 import 'package:siseon2/services/auth_service.dart';
 import 'package:siseon2/services/device_cache_service.dart';
+import 'package:siseon2/widgets/rect_card.dart';
 
 class DeviceInfoPage extends StatefulWidget {
   const DeviceInfoPage({super.key});
@@ -15,9 +16,14 @@ class DeviceInfoPage extends StatefulWidget {
 }
 
 class _DeviceInfoPageState extends State<DeviceInfoPage> {
+  // Theme
   static const Color backgroundBlack = Color(0xFF0D1117);
   static const Color cardGrey       = Color(0xFF161B22);
   static const Color primaryBlue    = Color(0xFF3B82F6);
+  static const Color okGreen        = Color(0xFF22C55E);
+
+  // 하드코딩된 현재 앱/디바이스 펌웨어 버전
+  static const String _currentFwVersion = '1.3.5';
 
   Map<String, dynamic>? _profile;
   String? _deviceSerial;
@@ -145,10 +151,9 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
       );
 
       if (res.statusCode == 200 || res.statusCode == 204) {
-        // ✅ 프로필별 캐시 정리 (진짜 핵심)
+        // 캐시 정리
         await DeviceCacheService.clearDeviceForProfile(_profileIdSafe!);
 
-        // (레거시) 전역 키도 정리
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove('deviceSerial');
         await prefs.remove('isDeviceRegistered');
@@ -215,6 +220,7 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           children: [
             const SizedBox(height: 8),
+            // 프로필 아바타 + 이름
             Center(
               child: CircleAvatar(
                 radius: 50,
@@ -233,21 +239,108 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
                 ),
               ),
             ),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: cardGrey,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+
+            const SizedBox(height: 20),
+
+            // 시리얼 넘버 카드
+            RectCard(
+              bgColor: cardGrey,
+              outlineColor: Colors.white.withOpacity(0.16),
+              elevated: false,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  const Text("시리얼 넘버", style: TextStyle(color: Colors.white54, fontSize: 12)),
-                  const SizedBox(height: 6),
-                  Text(
-                    _deviceSerial ?? '등록된 기기가 없습니다.',
-                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: primaryBlue.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: primaryBlue.withOpacity(0.35), width: 1),
+                    ),
+                    child: const Icon(Icons.confirmation_number, color: primaryBlue),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('시리얼 넘버',
+                            style: TextStyle(color: Colors.white54, fontSize: 12)),
+                        const SizedBox(height: 4),
+                        Text(
+                          _deviceSerial ?? '등록된 기기가 없습니다.',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 12),
+
+            // 펌웨어 버전 카드 (현재는 최신 버전으로 고정)
+            RectCard(
+              bgColor: cardGrey,
+              outlineColor: Colors.white.withOpacity(0.16),
+              elevated: false,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: okGreen.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: okGreen.withOpacity(0.35), width: 1),
+                    ),
+                    child: const Icon(Icons.system_update, color: okGreen),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('펌웨어 버전',
+                            style: TextStyle(color: Colors.white54, fontSize: 12)),
+                        const SizedBox(height: 4),
+                        Text(
+                          _currentFwVersion,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: okGreen.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: okGreen.withOpacity(0.45), width: 1),
+                    ),
+                    child: Row(
+                      children: const [
+                        Icon(Icons.check_circle, size: 14, color: okGreen),
+                        SizedBox(width: 6),
+                        Text(
+                          '최신 버전입니다',
+                          style: TextStyle(color: okGreen, fontWeight: FontWeight.w700, fontSize: 12),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
