@@ -5,7 +5,7 @@ import 'package:siseon2/models/slot_data.dart';
 import 'package:siseon2/services/auth_service.dart';
 
 class StatsService {
-  static const _base = 'i13b101.p.ssafy.io:8080';
+  static const _base = 'https://i13b101.p.ssafy.io/siseon';
 
   /// 기간별 통계 조회
   static Future<List<PostureStats>> fetchPostureStats({

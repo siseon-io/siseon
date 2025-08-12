@@ -1,7 +1,9 @@
 // lib/root_screen.dart
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // ✅ 레거시 폴백용
 
 import 'pages/home_screen.dart';
 import 'pages/manual_page.dart';
@@ -10,6 +12,8 @@ import 'pages/settings/settings_page.dart';
 
 import 'package:siseon2/models/control_mode.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
+import 'package:siseon2/services/mqtt_service.dart';          // ✅ MQTT
+import 'package:siseon2/services/device_cache_service.dart';  // ✅ deviceSerial 로드/갱신
 
 class RootScreen extends StatefulWidget {
   const RootScreen({super.key});
@@ -21,13 +25,15 @@ class RootScreen extends StatefulWidget {
 class _RootScreenState extends State<RootScreen> {
   final GlobalKey<HomeScreenState> _homeKey = GlobalKey<HomeScreenState>();
 
-  // 🔇 BLE 디버그 토글 (필요할 때만 true로)
   static const bool _bleDebug = false;
 
   int _currentIndex = 0;
-  BluetoothCharacteristic? _writableChar;
   ControlMode _currentMode = ControlMode.auto;
   int? _profileId;
+
+  // ✅ HomeScreen에서 연결 시 콜백으로 받는다 (ble_session 제거)
+  BluetoothCharacteristic? _writableChar;
+  String? _deviceSerial; // DeviceCacheService/레거시/BLE에서 폴백
 
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color rootBackground = Color(0xFF161B22);
@@ -36,30 +42,26 @@ class _RootScreenState extends State<RootScreen> {
   @override
   void initState() {
     super.initState();
-
-    // 🔇 플러그인 로그 전부 끔 (다른 곳에서 verbose로 바뀌지 않게 여기서 명시)
     FlutterBluePlus.setLogLevel(LogLevel.none);
-
-    _loadProfileId();
-
-    // 🔍 필요할 때만 디버그 리스너 부착
+    mqttService.connect();         // ✅ MQTT 선연결 시도
+    _loadProfileAndDevice();       // 프로필/디바이스 동기화
     if (_bleDebug) _attachBleDebugListeners();
   }
 
   void _attachBleDebugListeners() {
     FlutterBluePlus.adapterState.listen((state) {
-      debugPrint('🛰️ [AdapterState] 어댑터 상태: $state');
+      debugPrint('🛰️ [AdapterState] $state');
     });
-
     FlutterBluePlus.scanResults.listen((results) {
       for (final r in results) {
-        debugPrint(
-          '📡 [ScanResult] name=${r.device.name}, '
-              'id=${r.device.id}, RSSI=${r.rssi}, '
-              'serviceUuids=${r.advertisementData.serviceUuids}',
-        );
+        debugPrint('📡 [Scan] name=${r.device.name}, id=${r.device.id}, rssi=${r.rssi}');
       }
     });
+  }
+
+  Future<void> _loadProfileAndDevice() async {
+    await _loadProfileId();
+    await _ensureDeviceSerialWithFallback();
   }
 
   Future<void> _loadProfileId() async {
@@ -80,12 +82,81 @@ class _RootScreenState extends State<RootScreen> {
     }
   }
 
+  // ✅ 시리얼 확보: 캐시 → 서버조회후캐시 → 레거시 키 → BLE 특성 ID
+  Future<void> _ensureDeviceSerialWithFallback() async {
+    if (_profileId == null) {
+      setState(() => _deviceSerial = null);
+      return;
+    }
+
+    String? serial;
+
+    // 1) 프로필별 캐시
+    try {
+      final dev = await DeviceCacheService.loadDeviceForProfile(_profileId!);
+      serial = dev?['serial']?.toString();
+    } catch (_) {}
+
+    // 2) 서버에서 조회해 캐시 갱신 후 재조회
+    if (serial == null || serial.isEmpty) {
+      try {
+        await DeviceCacheService.fetchAndCacheDevice(profileId: _profileId!);
+        final dev2 = await DeviceCacheService.loadDeviceForProfile(_profileId!);
+        serial = dev2?['serial']?.toString();
+      } catch (_) {}
+    }
+
+    // 3) 레거시 키 폴백 (deviceSerial/isDeviceRegistered)
+    if (serial == null || serial.isEmpty) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final legacyReg = prefs.getBool('isDeviceRegistered') ?? false;
+        final legacySerial = prefs.getString('deviceSerial');
+        if (legacyReg && legacySerial != null && legacySerial.isNotEmpty) {
+          serial = legacySerial;
+          // 👉 프로필별 캐시에 이식(앞으로는 여기서 읽히게)
+          await DeviceCacheService.saveDeviceForProfile(
+            _profileId!,
+            {'serial': legacySerial},
+          );
+        }
+      } catch (_) {}
+    }
+
+    // 4) 그래도 없으면 BLE에서 폴백 (연결돼 있다면)
+    if ((serial == null || serial.isEmpty) && _writableChar != null) {
+      serial = _deviceIdFromChar(_writableChar!);
+    }
+
+    setState(() {
+      _deviceSerial = (serial != null && serial.isNotEmpty) ? serial : null;
+    });
+  }
+
+  String _deviceIdFromChar(BluetoothCharacteristic ch) {
+    try {
+      return ch.device.id.str;
+    } catch (_) {
+      try {
+        // ignore: deprecated_member_use
+        return ch.device.remoteId.str;
+      } catch (_) {
+        try {
+          // ignore: deprecated_member_use
+          return ch.remoteId.str;
+        } catch (_) {
+          return ch.device.id.toString();
+        }
+      }
+    }
+  }
+
   void _goToSettingsPage() {
     setState(() => _currentIndex = 2);
   }
 
   void _handleAiModeFromHome() {
-    _homeKey.currentState?.setModeExternal(ControlMode.auto);
+    _homeKey.currentState?.setModeExternal(ControlMode.auto); // 홈 카드 갱신
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('🤖 AI 모드로 전환됩니다.'), duration: Duration(seconds: 2)),
     );
@@ -96,11 +167,77 @@ class _RootScreenState extends State<RootScreen> {
       await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
     }
     if (idx == 1) {
-      await _loadProfileId();
+      await _loadProfileAndDevice(); // 챗봇/수동 들어갈 때 최신화
     }
     setState(() => _currentIndex = idx);
   }
 
+  // ── 로딩 오버레이 ─────────────────────────────────────────────
+  Future<void> _showLoadingOverlay(String message, Duration dur) async {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      useRootNavigator: true,
+      builder: (_) => WillPopScope(
+        onWillPop: () async => false,
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 28),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0D1117).withOpacity(0.9),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white24),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const CircularProgressIndicator(),
+                const SizedBox(height: 16),
+                Text(message,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 14)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await Future.delayed(dur);
+    if (mounted) Navigator.of(context, rootNavigator: true).pop();
+  }
+
+  // ── MQTT 발행 ─────────────────────────────────────────────
+  Future<bool> _publishControlMode(ControlMode nextMode, {required String deviceSerial}) async {
+    if (_profileId == null) return false;
+
+    final payload = {
+      'profile_id': _profileId.toString(),
+      'previous_mode': _currentMode.name, // 현재 상태
+      'current_mode': nextMode.name,
+    };
+
+    try {
+      // 홈스크린과 동일 규격: /control_mode/<deviceSerial>
+      mqttService.publish('/control_mode/$deviceSerial', payload);
+      if (mounted) {
+        setState(() => _currentMode = nextMode); // 상태 갱신
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('📶 MQTT 발행 완료: ${nextMode.name}')),
+        );
+      }
+      return true;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('❌ MQTT 발행 실패: $e')),
+        );
+      }
+      return false;
+    }
+  }
+
+  // ── 수동 탭 핸들러 (MQTT → 로딩 → ManualPage) ────────────────
   Future<void> _handleManualTap() async {
     if (_profileId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -108,38 +245,57 @@ class _RootScreenState extends State<RootScreen> {
       );
       return;
     }
-    if (_writableChar == null) {
+
+    final ch = _writableChar;
+    if (ch == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ 먼저 BLE 기기를 연결해주세요.')),
+        const SnackBar(content: Text('⚠️ 먼저 홈에서 BLE 기기를 연결해주세요.')),
       );
       return;
     }
 
-    // ❌ 여기서 HomeScreen 모드 전환하지 말자 (간접 끊김 원인 차단)
-    // _homeKey.currentState?.setModeExternal(ControlMode.manual);
+    final serial = (_deviceSerial != null && _deviceSerial!.isNotEmpty)
+        ? _deviceSerial!
+        : ch.remoteId.toString();
 
-    // ❌ 3초 대기 제거
-    // ScaffoldMessenger.of(context).showSnackBar(
-    //   const SnackBar(content: Text('3초 뒤 매뉴얼 화면으로 전환됩니다.')),
-    // );
-    // await Future.delayed(const Duration(seconds: 3));
+    if (serial.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ 디바이스 ID(시리얼)를 확인할 수 없습니다.')),
+      );
+      return;
+    }
 
+    // 1) 수동 모드로 MQTT 발행 (previous_mode는 _currentMode 기준)
+    await _publishControlMode(ControlMode.manual, deviceSerial: serial);
+
+    // 2) 3초 로딩
+    await _showLoadingOverlay('잠깐만요, 자료 뒤적이는 중 📚', const Duration(seconds: 3));
+
+    // 3) 가로 고정 → ManualPage 진입
     await SystemChrome.setPreferredOrientations(
       [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight],
     );
 
     if (!mounted) return;
-    await Navigator.push(
+
+    // ✅ ManualPage가 닫힐 때 ControlMode를 결과로 돌려줌 (auto 기대)
+    final ControlMode? result = await Navigator.push<ControlMode>(
       context,
       MaterialPageRoute(
         builder: (_) => ManualPage(
-          writableChar: _writableChar!,
+          writableChar: ch,
           profileId: _profileId!,
         ),
       ),
     );
 
+    // 세로 고정 복구
     await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+
+    // ✅ 결과값을 전역 상태와 홈 카드에 반영 (중요!)
+    if (result != null && mounted) {
+      setState(() => _currentMode = result);
+    }
   }
 
   @override
@@ -149,17 +305,24 @@ class _RootScreenState extends State<RootScreen> {
         key: _homeKey,
         onAiModeSwitch: _handleAiModeFromHome,
         onGoToProfile: _goToSettingsPage,
-        onConnect: (char) {
-          // 🔕 디버그 출력 제거 (필요하면 _bleDebug로 감싸기)
-          if (_bleDebug) {
-            debugPrint('🔗 [RootScreen] WritableChar 수신: ${char.uuid}');
-          }
-          setState(() => _writableChar = char);
-        },
         currentMode: _currentMode,
         onModeChange: (mode) {
-          if (_bleDebug) debugPrint('🔄 [RootScreen] 모드 변경: $mode');
+          if (_bleDebug) debugPrint('🔄 [RootScreen] mode=$mode');
           setState(() => _currentMode = mode);
+        },
+        // ✅ BLE 연결되면 여기로 characteristic 넘어옴
+        onConnect: (c) async {
+          setState(() => _writableChar = c);
+          // BLE 연결 직후 시리얼 미확보 상태면 폴백으로라도 세팅
+          if (_deviceSerial == null || _deviceSerial!.isEmpty) {
+            final fromBle = _deviceIdFromChar(c);
+            if (fromBle.isNotEmpty) {
+              setState(() => _deviceSerial = fromBle);
+            }
+            // 동시에 캐시/서버 fetch도 백그라운드로 시도
+            // ignore: unawaited_futures
+            _ensureDeviceSerialWithFallback();
+          }
         },
       ),
       (_profileId == null)
@@ -207,7 +370,8 @@ class _RootScreenState extends State<RootScreen> {
         title: const Text('챗봇', style: TextStyle(color: Colors.white)),
       ),
       body: const Center(
-        child: Text('먼저 프로필을 선택/생성해주세요.', style: TextStyle(color: Colors.white70)),
+        child: Text('먼저 프로필을 선택/생성해주세요.',
+            style: TextStyle(color: Colors.white70)),
       ),
     );
   }
@@ -239,7 +403,8 @@ class _RootScreenState extends State<RootScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, color: inactiveGrey),
-            Text(label, style: const TextStyle(color: inactiveGrey)),
+            const SizedBox(height: 2),
+            const Text('수동', style: TextStyle(color: inactiveGrey)),
           ],
         ),
       ),

@@ -5,7 +5,7 @@ import 'package:siseon2/services/auth_service.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
 
 class DeviceCacheService {
-  static const _baseUrl = 'http://i13b101.p.ssafy.io:8080';
+  static const _baseUrl = 'https://i13b101.p.ssafy.io/siseon';
 
   // ── 키 생성 (프로필별 분리) ────────────────────────────────────────────────
   static String _serialKey(int profileId) => 'deviceSerial_$profileId';

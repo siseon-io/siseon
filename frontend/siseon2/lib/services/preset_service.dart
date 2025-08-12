@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 import 'auth_service.dart';
 
 class PresetService {
-  static const String baseUrl = 'http://i13b101.p.ssafy.io:8080';
+  static const String baseUrl = 'https://i13b101.p.ssafy.io/siseon';
 
   /// 프리셋 목록 불러오기
   static Future<List<Map<String, dynamic>>> fetchPresets(int profileId) async {

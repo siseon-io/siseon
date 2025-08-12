@@ -38,7 +38,7 @@ class Faq {
 }
 
 class FaqService {
-  static const _base = 'http://i13b101.p.ssafy.io:8000/api';
+  static const _base = 'https://i13b101.p.ssafy.io/ai/api';
 
   // ✅ 캐시 네임스페이스 버전(깨진 캐시 무시)
   static const _ns = 'v2';

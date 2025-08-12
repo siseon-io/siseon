@@ -8,7 +8,6 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import '../models/control_mode.dart';
 import '../services/mqtt_service.dart';
-import '../services/profile_cache_service.dart';
 import '../services/device_cache_service.dart';
 
 class ManualPage extends StatefulWidget {
@@ -25,16 +24,11 @@ class ManualPage extends StatefulWidget {
   State<ManualPage> createState() => _ManualPageState();
 }
 
-enum PayloadFmt {
-  i8x3,    // 3바이트: [X, Y, Z] 각각 int8
-  i16x3,   // 6바이트: [X_low, X_high, Y_low, Y_high, Z_low, Z_high]
-  i8x4,    // 4바이트: [X, Y, Z, 0] 패딩 추가
-  i8x8,    // 8바이트: [X, Y, Z, 0, 0, 0, 0, 0] 긴 패딩
-  i8x20    // 20바이트: 표준 BLE MTU 크기
-}
+enum PayloadFmt { i8x3, i16x3, i8x4, i8x8, i8x20 }
 
 class _ManualPageState extends State<ManualPage> {
-  List<int> _payload = [0, 0, 0]; // [X, Y, Z] 범위: -100~100
+  // ── 상태
+  List<int> _payload = [0, 0, 0];
   String _debugMessage = '🔌 연결 상태 확인 중...';
   String? _lastBleError;
 
@@ -42,22 +36,25 @@ class _ManualPageState extends State<ManualPage> {
   StreamSubscription<BluetoothConnectionState>? _connectionSub;
 
   bool _useWriteWithoutResponse = true;
-  bool _publishedOnExit = false;
   bool _isConnected = false;
   bool _isWriting = false;
 
+  // pop 시 중복 발행 방지용
+  bool _isExiting = false;
+
   PayloadFmt _fmt = PayloadFmt.i8x3;
-  int _mtuSize = 23; // 기본 BLE MTU
+  int _mtuSize = 23;
 
-  // 포맷별 시도 순서 (실패 시 다음 포맷으로 자동 전환)
+  String? _deviceSerial;
+  bool _resolvingSerial = false;
+
   static const List<PayloadFmt> _formatFallback = [
-    PayloadFmt.i8x3,   // 3바이트부터 시작
-    PayloadFmt.i8x4,   // 4바이트 시도
-    PayloadFmt.i8x8,   // 8바이트 시도
-    PayloadFmt.i16x3,  // 6바이트 시도
-    PayloadFmt.i8x20,  // 20바이트 마지막 시도
+    PayloadFmt.i8x3,
+    PayloadFmt.i8x4,
+    PayloadFmt.i8x8,
+    PayloadFmt.i16x3,
+    PayloadFmt.i8x20,
   ];
-
   int _currentFormatIndex = 0;
 
   @override
@@ -69,40 +66,90 @@ class _ManualPageState extends State<ManualPage> {
       statusBarIconBrightness: Brightness.light,
     ));
 
+    // MQTT 연결 (내부에서 재시도)
+    // ignore: unawaited_futures
+    mqttService.connect();
+
+    _resolveDeviceSerial();
     _checkCharacteristicCapabilities();
     _requestMtuSize();
     _listenConnectionState();
     _startSending();
   }
 
-  /// MTU 크기 요청 (옵션)
+  // ── Device Serial 확보: 캐시 → 서버 → BLE ID
+  Future<void> _resolveDeviceSerial() async {
+    if (_resolvingSerial) return;
+    _resolvingSerial = true;
+
+    String? serial;
+
+    try {
+      final dev = await DeviceCacheService.loadDeviceForProfile(widget.profileId);
+      serial = dev?['serial']?.toString();
+    } catch (_) {}
+
+    if (serial == null || serial.isEmpty) {
+      try {
+        await DeviceCacheService.fetchAndCacheDevice(profileId: widget.profileId);
+        final dev2 = await DeviceCacheService.loadDeviceForProfile(widget.profileId);
+        serial = dev2?['serial']?.toString();
+      } catch (_) {}
+    }
+
+    if (serial == null || serial.isEmpty) {
+      serial = _bleFallbackId();
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _deviceSerial = (serial != null && serial.isNotEmpty) ? serial : null;
+      _resolvingSerial = false;
+      _debugMessage = (_deviceSerial != null)
+          ? '🔗 DeviceSerial: $_deviceSerial'
+          : '⚠️ DeviceSerial을 찾지 못했습니다. (캐시/서버/BLE 확인 필요)';
+    });
+  }
+
+  String _bleFallbackId() {
+    try {
+      return widget.writableChar.device.id.str; // 최신
+    } catch (_) {
+      try {
+        // ignore: deprecated_member_use
+        return widget.writableChar.device.remoteId.str; // 구버전
+      } catch (_) {
+        try {
+          // ignore: deprecated_member_use
+          return widget.writableChar.remoteId.str; // 일부 버전
+        } catch (_) {
+          try {
+            return widget.writableChar.device.id.toString();
+          } catch (_) {
+            return '';
+          }
+        }
+      }
+    }
+  }
+
   void _requestMtuSize() async {
     try {
       final mtu = await widget.writableChar.device.requestMtu(512);
       _mtuSize = mtu;
-      setState(() {
-        _debugMessage = 'ℹ️ MTU 크기: $_mtuSize 바이트';
-      });
-    } catch (e) {
-      // MTU 요청 실패해도 계속 진행
-    }
+      setState(() => _debugMessage = 'ℹ️ MTU 크기: $_mtuSize 바이트');
+    } catch (_) {}
   }
 
-  /// 특성 쓰기 능력 확인
   void _checkCharacteristicCapabilities() {
     final p = widget.writableChar.properties;
     final supportsWrite = p.write || p.writeWithoutResponse;
     _useWriteWithoutResponse = p.writeWithoutResponse;
 
-    if (!supportsWrite) {
-      setState(() {
-        _debugMessage = '⚠️ 이 특성은 write를 지원하지 않습니다.';
-      });
-      return;
-    }
-
     setState(() {
-      _debugMessage = 'ℹ️ 특성 지원: Write=${p.write}, WriteNR=${p.writeWithoutResponse}';
+      _debugMessage = supportsWrite
+          ? 'ℹ️ 특성 지원: Write=${p.write}, WriteNR=${p.writeWithoutResponse}'
+          : '⚠️ 이 특성은 write를 지원하지 않습니다.';
     });
   }
 
@@ -113,7 +160,8 @@ class _ManualPageState extends State<ManualPage> {
       if (_isConnected) {
         _startSending();
         setState(() {
-          _debugMessage = '✅ BLE 연결됨 (MTU=$_mtuSize, NR=$_useWriteWithoutResponse, fmt=$_fmt)';
+          _debugMessage =
+          '✅ BLE 연결됨 (MTU=$_mtuSize, NR=$_useWriteWithoutResponse, fmt=$_fmt)';
         });
       } else if (state == BluetoothConnectionState.disconnected) {
         _sendTimer?.cancel();
@@ -134,7 +182,6 @@ class _ManualPageState extends State<ManualPage> {
     if (_sendTimer != null) return;
     _sendTimer = Timer.periodic(const Duration(milliseconds: 200), (_) async {
       if (!_isConnected || _isWriting) return;
-
       _isWriting = true;
       try {
         await _sendWithAutoFormat();
@@ -144,76 +191,54 @@ class _ManualPageState extends State<ManualPage> {
     });
   }
 
-  /// 자동 포맷 전환하며 전송 시도
   Future<void> _sendWithAutoFormat() async {
     final bytes = _encodeAxes(_payload);
-
     try {
-      // 현재 포맷으로 전송 시도
       await _attemptWrite(bytes);
-
-      // 성공 시
       _lastBleError = null;
       setState(() {
-        _debugMessage = '📤 전송 성공: ${_payload.join(", ")} → [${bytes.join(", ")}] (${bytes.length}B, fmt=$_fmt)';
+        _debugMessage =
+        '📤 전송 성공: ${_payload.join(", ")} → [${bytes.join(", ")}] (${bytes.length}B, fmt=$_fmt)';
       });
-
     } catch (e) {
-      // 길이 오류면 다음 포맷으로 전환 후 재시도
       if (_isLenErr(e)) {
         final success = await _tryNextFormat();
-        if (!success) {
-          _handleWriteError(e);
-        }
+        if (!success) _handleWriteError(e);
       } else {
         _handleWriteError(e);
       }
     }
   }
 
-  /// WriteNR/WR 자동 폴백하며 전송
   Future<void> _attemptWrite(List<int> bytes) async {
     try {
-      await widget.writableChar.write(
-        bytes,
-        withoutResponse: _useWriteWithoutResponse,
-      );
+      await widget.writableChar.write(bytes, withoutResponse: _useWriteWithoutResponse);
     } on PlatformException catch (e) {
-      // WriteNR 거부 시 WR로 폴백
       if (_useWriteWithoutResponse && _looksLikeNoNr(e)) {
         await widget.writableChar.write(bytes, withoutResponse: false);
         _useWriteWithoutResponse = false;
-        setState(() {
-          _debugMessage = '↩️ WriteNR 실패 → Write로 전환';
-        });
+        setState(() => _debugMessage = '↩️ WriteNR 실패 → Write로 전환');
       } else {
         rethrow;
       }
     }
   }
 
-  /// 다음 포맷으로 전환 시도
   Future<bool> _tryNextFormat() async {
-    if (_currentFormatIndex >= _formatFallback.length - 1) {
-      // 모든 포맷 시도했지만 실패
-      return false;
-    }
-
+    if (_currentFormatIndex >= _formatFallback.length - 1) return false;
     _currentFormatIndex++;
     _fmt = _formatFallback[_currentFormatIndex];
 
     try {
       final newBytes = _encodeAxes(_payload);
       await _attemptWrite(newBytes);
-
       _lastBleError = null;
       setState(() {
-        _debugMessage = '✅ 포맷 전환 성공: $_fmt → [${newBytes.join(", ")}] (${newBytes.length}B)';
+        _debugMessage =
+        '✅ 포맷 전환 성공: $_fmt → [${newBytes.join(", ")}] (${newBytes.length}B)';
       });
       return true;
-
     } catch (e) {
-      // 이 포맷도 실패하면 재귀적으로 다음 포맷 시도
       if (_isLenErr(e)) {
         return await _tryNextFormat();
       } else {
@@ -223,7 +248,6 @@ class _ManualPageState extends State<ManualPage> {
     }
   }
 
-  /// 현재 포맷으로 축값을 바이트 배열로 변환
   List<int> _encodeAxes(List<int> axes) {
     final x = axes[0].clamp(-100, 100);
     final y = axes[1].clamp(-100, 100);
@@ -232,38 +256,24 @@ class _ManualPageState extends State<ManualPage> {
     switch (_fmt) {
       case PayloadFmt.i8x3:
         return [_toInt8(x), _toInt8(y), _toInt8(z)];
-
       case PayloadFmt.i8x4:
         return [_toInt8(x), _toInt8(y), _toInt8(z), 0];
-
       case PayloadFmt.i8x8:
         return [_toInt8(x), _toInt8(y), _toInt8(z), 0, 0, 0, 0, 0];
-
       case PayloadFmt.i16x3:
-      // Little-endian int16
         return [
-          x & 0xFF, (x >> 8) & 0xFF,  // X
-          y & 0xFF, (y >> 8) & 0xFF,  // Y
-          z & 0xFF, (z >> 8) & 0xFF,  // Z
+          x & 0xFF, (x >> 8) & 0xFF,
+          y & 0xFF, (y >> 8) & 0xFF,
+          z & 0xFF, (z >> 8) & 0xFF,
         ];
-
       case PayloadFmt.i8x20:
         final base = [_toInt8(x), _toInt8(y), _toInt8(z)];
-        return base + List.filled(17, 0); // 20바이트까지 패딩
+        return base + List.filled(17, 0);
     }
   }
 
-  /// int8 2의 보수 변환 (-100~100 → -100~100 유지, 하위 8비트만)
-  int _toInt8(int value) {
-    if (value >= 0) {
-      return value & 0xFF;
-    } else {
-      // 음수를 2의 보수로 변환
-      return (256 + value) & 0xFF;
-    }
-  }
+  int _toInt8(int value) => value >= 0 ? (value & 0xFF) : ((256 + value) & 0xFF);
 
-  // 에러 판별
   bool _isLenErr(Object e) {
     final s = '$e'.toLowerCase();
     return s.contains('invalid_attribute_length') ||
@@ -283,9 +293,7 @@ class _ManualPageState extends State<ManualPage> {
   void _handleWriteError(Object e) {
     final detail = _bleErrorDetail(e);
     _lastBleError = detail;
-    setState(() {
-      _debugMessage = '❌ 전송 실패: $detail';
-    });
+    setState(() => _debugMessage = '❌ 전송 실패: $detail');
   }
 
   String _bleErrorDetail(Object e) {
@@ -299,7 +307,7 @@ class _ManualPageState extends State<ManualPage> {
     }
   }
 
-  // 조이스틱 핸들러들
+  // ── 조이스틱 핸들러
   void _onJoystickXZ(double x, double z) {
     x = _applyDeadzone(x);
     z = _applyDeadzone(z);
@@ -314,9 +322,7 @@ class _ManualPageState extends State<ManualPage> {
   void _onJoystickY(double y) {
     y = _applyDeadzone(y);
     final yi = (y * 100).round().clamp(-100, 100);
-    setState(() {
-      _payload[1] = yi;
-    });
+    setState(() => _payload[1] = yi);
   }
 
   void _resetXZ() => setState(() {
@@ -328,43 +334,44 @@ class _ManualPageState extends State<ManualPage> {
 
   double _applyDeadzone(double v, [double t = 0.08]) => v.abs() < t ? 0.0 : v;
 
-  Future<void> _publishAutoMode() async {
+  // ────────────────────────────────────────────────
+  // ✅ pop 때만 발행 (1회 보장)
+  Future<void> _exitWithAuto() async {
+    if (_isExiting) return; // 재진입 방지
+    _isExiting = true;
+
     try {
-      String topic = '/control_mode';
-      try {
-        final dev = await DeviceCacheService.loadDeviceForProfile(widget.profileId);
-        final serial = dev?['serial'];
-        if (serial != null && serial.toString().isNotEmpty) {
-          topic = '/control_mode/$serial';
-        }
-      } catch (_) {}
+      // serial 확보 안 됐으면 재시도
+      if (_deviceSerial == null || _deviceSerial!.isEmpty) {
+        await _resolveDeviceSerial();
+      }
 
-      final payload = {
-        'profile_id': widget.profileId.toString(),
-        'previous_mode': ControlMode.manual.name,
-        'current_mode': ControlMode.auto.name,
-      };
-
-      mqttService.publish(topic, payload);
-      setState(() {
-        _debugMessage = '📶 MQTT 발행 완료 → $topic $payload';
-      });
-    } catch (e) {
-      setState(() {
-        _debugMessage = '❌ MQTT 발행 실패: $e';
-      });
+      if (_deviceSerial != null && _deviceSerial!.isNotEmpty) {
+        final topic = '/control_mode/${_deviceSerial!}';
+        final payload = {
+          'profile_id': widget.profileId.toString(),
+          'previous_mode': ControlMode.manual.name,
+          'current_mode': ControlMode.auto.name,
+        };
+        mqttService.publish(topic, payload);
+        setState(() => _debugMessage = '📶 MQTT 발행 완료 → $topic $payload');
+      } else {
+        setState(() => _debugMessage = '❌ MQTT 미발행: deviceSerial 없음');
+      }
+    } finally {
+      if (mounted) {
+        Navigator.pop(context, ControlMode.auto); // 결과 전달
+      }
     }
   }
+  // ────────────────────────────────────────────────
 
   @override
   void dispose() {
     _sendTimer?.cancel();
     _connectionSub?.cancel();
 
-    if (!_publishedOnExit) {
-      _publishedOnExit = true;
-      _publishAutoMode();
-    }
+    // ⚠️ 여기서는 발행/Pop 하지 않음(중복 방지)
 
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.black,
@@ -375,13 +382,12 @@ class _ManualPageState extends State<ManualPage> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        if (!_publishedOnExit) {
-          _publishedOnExit = true;
-          await _publishAutoMode();
-        }
-        return true;
+    // Flutter 3.10+ : PopScope 권장 (WillPopScope로 바꿔도 됨)
+    return PopScope(
+      canPop: false, // 우리가 직접 pop 제어
+      onPopInvoked: (didPop) async {
+        if (didPop) return; // 이미 pop된 경우
+        await _exitWithAuto(); // 여기서만 발행+pop
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF0D1117),
@@ -433,18 +439,15 @@ class _ManualPageState extends State<ManualPage> {
                 ),
               ),
 
-              // 뒤로가기
+              // 좌상단 뒤로가기 버튼 (pop은 공통 경로로)
               Positioned(
                 top: 16,
                 left: 16,
                 child: IconButton(
                   icon: const Icon(Icons.arrow_back, color: Colors.white, size: 26),
                   onPressed: () async {
-                    if (!_publishedOnExit) {
-                      _publishedOnExit = true;
-                      await _publishAutoMode();
-                    }
-                    if (context.mounted) Navigator.pop(context);
+                    // 시스템 뒤로가기와 동일 경로로 유도
+                    await _exitWithAuto();
                   },
                 ),
               ),

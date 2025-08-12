@@ -6,7 +6,7 @@ import 'package:siseon2/models/chat_models.dart';
 
 class ChatApi {
   // 백엔드 Base URL
-  static const String _baseUrl = 'http://i13b101.p.ssafy.io:8000/api';
+  static const String _baseUrl = 'https://i13b101.p.ssafy.io/ai/api';
 
   // 401이면 refresh 후 1회 재시도
   Future<http.Response> _withAuthRetry(

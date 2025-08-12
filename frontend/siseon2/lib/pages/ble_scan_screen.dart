@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
+// 전역 세션을 쓰려면 이 임포트 유지 (원치 않으면 지워도 앱 동작엔 영향 없음)
+import 'package:siseon2/services/ble_session.dart';
+
 class AppColors {
   static const backgroundBlack = Color(0xFF0D1117);
   static const cardGrey = Color(0xFF161B22);
@@ -211,6 +214,21 @@ class _BleScanScreenState extends State<BleScanScreen> {
         _addLog('⚠️ 쓸 수 있는 특성을 찾지 못했습니다. (write/read 속성 확인 필요)');
       } else {
         _addLog('✅ Selected characteristic: ${_writableChar!.uuid}');
+
+        // 🔎 특성 속성 로그
+        final p = _writableChar!.properties;
+        _addLog('🧷 Char props → read=${p.read}, write=${p.write}, writeNR=${p.writeWithoutResponse}, notify=${p.notify}, indicate=${p.indicate}');
+
+        // 🔒 링크 검증 (read 또는 notify on/off)
+        final verified = await _verifyLink(_connectedDevice!, _writableChar!);
+        _addLog(verified ? '🔒 Link verify: OK' : '⚠️ Link verify: skipped or best-effort');
+
+        // (옵션) 전역 세션에 저장 — 전역 사용 원치 않으면 이 3줄 주석 처리
+        try {
+          await bleSession.setConnected(_connectedDevice!, _writableChar!);
+          _addLog('🌐 Global session set');
+        } catch (_) {}
+
         if (!mounted) return;
 
         // ✅ 결과 정상 전달 → 이 화면에서는 disconnect 하지 않음
@@ -226,6 +244,35 @@ class _BleScanScreenState extends State<BleScanScreen> {
     } catch (e) {
       _addLog('❌ Characteristic search failed: ${_formatBleError(e)}');
     }
+  }
+
+  // 🔎 무해한 링크 검증: read 가능하면 read, 아니면 notify on/off
+  Future<bool> _verifyLink(BluetoothDevice d, BluetoothCharacteristic c) async {
+    await Future.delayed(const Duration(milliseconds: 120));
+
+    if (c.properties.read) {
+      try {
+        final data = await c.read().timeout(const Duration(seconds: 1));
+        _addLog('🔎 Read probe ok (${data.length}B)');
+        return true;
+      } catch (e) {
+        _addLog('⚠️ Read probe failed: ${_formatBleError(e)}');
+      }
+    }
+
+    if (c.properties.notify || c.properties.indicate) {
+      try {
+        await c.setNotifyValue(true).timeout(const Duration(seconds: 1));
+        _addLog('🔔 Notify enabled');
+        await Future.delayed(const Duration(milliseconds: 80));
+        await c.setNotifyValue(false).timeout(const Duration(seconds: 1));
+        _addLog('🔕 Notify disabled');
+        return true;
+      } catch (e) {
+        _addLog('⚠️ Notify probe failed: ${_formatBleError(e)}');
+      }
+    }
+    return false; // 검증 못해도 연결은 유지
   }
 
   Future<void> _safeDisconnect(BluetoothDevice d) async {
