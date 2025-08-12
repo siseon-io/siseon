@@ -10,6 +10,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  video_player: ^2.9.1
   google_sign_in: ^6.2.1
   http: ^0.13.0
   flutter_joystick: ^0.2.2
@@ -29,24 +30,15 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   # 날짜 포맷팅
-  intl: ^0.20.2   # flutter_localizations와 호환되도록 상향
+  intl: ^0.20.2
 
   # BEL 스캔/연결
   flutter_blue_plus: ^1.35.5
   permission_handler: ^11.0.1
 
-  # BLE 광고 송신 (단방향)
+  # BLE 광고 송신
   flutter_ble_peripheral: ^1.2.6
   flutter_native_splash: ^2.4.6
-
-flutter_native_splash:
-  color: "#0D1117"          # 스플래시 배경색 (앱 다크톤에 맞춤)
-  image: assets/images/eye_open.png  # 스플래시 로고 이미지 경로
-  android: true
-  ios: true
-  android_12:
-    color: "#0D1117"
-    image: assets/images/eye_open.png
 
 dev_dependencies:
   flutter_test:
@@ -55,6 +47,7 @@ dev_dependencies:
   build_runner: ^2.4.0
   json_serializable: ^6.6.1
   permission_handler: ^11.0.1
+  flutter_launcher_icons: ^0.13.1
 
 flutter:
   uses-material-design: true
@@ -63,6 +56,7 @@ flutter:
     - assets/images/
     - assets/certs/cert.pem
     - .env
+    - assets/loading/loading.mp4
 
   fonts:
     - family: Pretendard
@@ -85,3 +79,17 @@ flutter:
           weight: 800
         - asset: assets/fonts/Pretendard-Black.ttf
           weight: 900
+
+flutter_native_splash:
+  color: "#0D1117"
+  image: assets/images/eye_open.png
+  android: true
+  ios: true
+  android_12:
+    color: "#0D1117"
+    image: assets/images/eye_open.png
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/eye_open.png"

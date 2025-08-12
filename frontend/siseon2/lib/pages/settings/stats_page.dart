@@ -4,6 +4,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:siseon2/models/slot_data.dart';
 import 'package:siseon2/services/stats_service.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
+import 'package:siseon2/widgets/rect_card.dart';
 
 class StatsPage extends StatefulWidget {
   const StatsPage({super.key});
@@ -15,9 +16,7 @@ class StatsPage extends StatefulWidget {
 class _StatsPageState extends State<StatsPage> {
   // ── THEME ────────────────────────────────────────────────────────────────────
   static const Color backgroundBlack = Color(0xFF0D1117);
-  static const Color cardGrey = Color(0xFF161B22);
   static const Color primaryBlue = Color(0xFF3B82F6);
-  static const Color accentGreen = Color(0xFF22C55E);
   static const Color errorRed = Color(0xFFF87171);
   static const TextStyle _label = TextStyle(color: Colors.white70, fontSize: 12);
 
@@ -199,22 +198,93 @@ class _StatsPageState extends State<StatsPage> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              _buildCard(
-                '🟢 일간 자세 비율',
-                SizedBox(height: 220, child: _AveragePieChart()),
-                trailing: _legendMini(),
+              // ── 카드 1: 일간 도넛 ──
+              RectCard(
+                elevated: true,
+                outlineColor: Colors.white.withOpacity(0.16),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '일간 자세 비율',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        _legendMini(),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(height: 220, child: _AveragePieChart()),
+                  ],
+                ),
               ),
               const SizedBox(height: 20),
-              _buildCard(
-                '📊 주간 자세 통계',
-                SizedBox(height: 240, child: _StackedWeeklyBarChart()),
-                trailing: _legendMini(),
+
+              // ── 카드 2: 주간 스택 바 ──
+              RectCard(
+                elevated: true,
+                outlineColor: Colors.white.withOpacity(0.16),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '주간 자세 통계',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        _legendMini(),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(height: 240, child: _StackedWeeklyBarChart()),
+                  ],
+                ),
               ),
               const SizedBox(height: 20),
-              _buildCard(
-                '📈 연간 월별 자세 추이',
-                SizedBox(height: 240, child: _MonthlyTrendChart()),
-                trailing: _legendMini(),
+
+              // ── 카드 3: 월별 트렌드 ──
+              RectCard(
+                elevated: true,
+                outlineColor: Colors.white.withOpacity(0.16),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            '연간 월별 자세 추이',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        _legendMini(),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(height: 240, child: _MonthlyTrendChart()),
+                  ],
+                ),
               ),
             ],
           ),
@@ -236,32 +306,6 @@ class _StatsPageState extends State<StatsPage> {
           icon: const Icon(Icons.refresh),
         ),
       ],
-    );
-  }
-
-  // ── WIDGETS ──────────────────────────────────────────────────────────────────
-  Widget _buildCard(String title, Widget child, {Widget? trailing}) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: cardGrey, borderRadius: BorderRadius.circular(16)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-                ),
-              ),
-              if (trailing != null) trailing,
-            ],
-          ),
-          const SizedBox(height: 12),
-          child,
-        ],
-      ),
     );
   }
 

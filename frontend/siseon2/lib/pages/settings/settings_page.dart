@@ -10,7 +10,7 @@ import '../../services/profile_cache_service.dart';
 import 'edit_profile.dart';
 import 'preset_page.dart';
 import 'device_info.dart';
-import 'package:siseon2/pages/settings/stats_page.dart'; // ✅ 통계 페이지 import
+import 'package:siseon2/pages/settings/stats_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -25,7 +25,6 @@ class _SettingsPageState extends State<SettingsPage> {
   int? _selectedProfileId;
   bool _isLoading = true;
 
-  // 🎨 색상
   static const Color backgroundBlack = Color(0xFF0D1117);
   static const Color cardGrey = Color(0xFF161B22);
   static const Color primaryBlue = Color(0xFF3B82F6);
@@ -37,7 +36,6 @@ class _SettingsPageState extends State<SettingsPage> {
     _fetchProfile();
   }
 
-  // 👉 공통 슬라이드 전환
   Route<T> _slideRightToLeft<T>(Widget page) {
     return PageRouteBuilder<T>(
       pageBuilder: (_, __, ___) => page,
@@ -101,7 +99,32 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // 🔐 회원 탈퇴 API 호출
+  // ✅ 푸시 토큰 해제 API 호출
+  Future<void> _unregisterPush() async {
+    final token = await AuthService.getValidAccessToken();
+    if (token == null || _selectedProfileId == null) return;
+
+    try {
+      final uri = Uri.parse(
+        'http://i13b101.p.ssafy.io:8080/api/push/unregister?profileId=$_selectedProfileId',
+      );
+
+      final response = await http.post(
+        uri,
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+      );
+
+      if (response.statusCode >= 300) {
+        debugPrint('🔥 unregister 실패: ${response.statusCode} ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('🔥 unregister 예외 발생: $e');
+    }
+  }
+
   Future<void> _deleteUser() async {
     final token = await AuthService.getValidAccessToken();
     if (token == null) return;
@@ -126,7 +149,6 @@ class _SettingsPageState extends State<SettingsPage> {
     } catch (_) {}
   }
 
-  // ❗ 회원 탈퇴 확인 다이얼로그
   void _showDeleteUserDialog() {
     showDialog(
       context: context,
@@ -208,7 +230,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // 🚪 로그아웃 다이얼로그
   void _showLogoutDialog() {
     showDialog(
       context: context,
@@ -236,8 +257,15 @@ class _SettingsPageState extends State<SettingsPage> {
                 children: [
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: () {
+                      onPressed: () async {
                         Navigator.pop(context);
+
+                        await _unregisterPush(); // ✅ 푸시 등록 해제
+
+                        await AuthService.clearTokens();
+                        await ProfileCacheService.clearProfile();
+
+                        if (!mounted) return;
                         Navigator.pushAndRemoveUntil(
                           context,
                           _slideRightToLeft(const LoginScreen()),
@@ -293,13 +321,10 @@ class _SettingsPageState extends State<SettingsPage> {
       margin: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
       decoration: BoxDecoration(
         color: cardGrey,
-        borderRadius: BorderRadius.circular(16), // 홈과 비슷한 둥글기
-        border: Border.all(                       // ✅ 연한 테두리 추가
-          color: Colors.white.withOpacity(0.16),
-          width: 1,
-        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withOpacity(0.16), width: 1),
         boxShadow: [
-          BoxShadow(                              // (옵션) 아주 약한 그림자
+          BoxShadow(
             color: Colors.black.withOpacity(0.18),
             blurRadius: 10,
             offset: const Offset(0, 4),
@@ -378,21 +403,33 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 24),
           _buildMenuItem(Icons.account_circle, '프로필 변경', () {
             Navigator.pushReplacement(
-                context, _slideRightToLeft(const ProfileSelectScreen()));
+              context,
+              _slideRightToLeft(const ProfileSelectScreen()),
+            );
           }),
           _buildMenuItem(Icons.edit, '프로필 수정', () {
-            Navigator.push(context, _slideRightToLeft(const EditProfilePage()))
-                .then((_) => _fetchProfile());
+            Navigator.push(
+              context,
+              _slideRightToLeft(const EditProfilePage()),
+            ).then((_) => _fetchProfile());
           }),
           _buildMenuItem(Icons.bar_chart, '통계 보기', () {
-            Navigator.push(context, _slideRightToLeft(const StatsPage()));
+            Navigator.push(
+              context,
+              _slideRightToLeft(const StatsPage()),
+            );
           }),
           _buildMenuItem(Icons.favorite, '프리셋', () {
-            Navigator.push(context, _slideRightToLeft(const PresetPage()));
+            Navigator.push(
+              context,
+              _slideRightToLeft(const PresetPage()),
+            );
           }),
-          _buildMenuItem(Icons.system_update_alt, '펌웨어 업데이트', () {
-            // 파라미터 필요 없도록 DeviceInfoPage 기본 생성자 사용
-            Navigator.push(context, _slideRightToLeft(const DeviceInfoPage()));
+          _buildMenuItem(Icons.system_update_alt, '기기 정보', () {
+            Navigator.push(
+              context,
+              _slideRightToLeft(const DeviceInfoPage()),
+            );
           }),
           _buildMenuItem(Icons.logout, '로그아웃', _showLogoutDialog),
         ],

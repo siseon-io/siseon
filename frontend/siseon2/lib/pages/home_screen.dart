@@ -49,6 +49,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class HomeScreenState extends State<HomeScreen> {
+  // Colors
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color backgroundBlack = Color(0xFF0D1117);
   static const Color headerGrey = Color(0xFF161B22);
@@ -66,6 +67,7 @@ class HomeScreenState extends State<HomeScreen> {
   bool _isDeviceRegistered = false;
   bool _deviceStateReady = false;
   String? _deviceSerial;
+  String? _targetCharUuid; // ✅ 디바이스 캐시에서 동적 로드
 
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _writableChar;
@@ -115,6 +117,7 @@ class HomeScreenState extends State<HomeScreen> {
 
   void setModeExternal(ControlMode newMode) => _setMode(newMode);
 
+  // ─────────── 권한/상태 ───────────
   Future<void> _initPermissions() async {
     final bleScan = await Permission.bluetoothScan.request();
     final bleConnect = await Permission.bluetoothConnect.request();
@@ -132,6 +135,7 @@ class HomeScreenState extends State<HomeScreen> {
     setState(() => _isBluetoothOn = isOn);
   }
 
+  // ─────────── 프로필/디바이스 동기화 ───────────
   Future<void> _syncProfileAndDevice() async {
     final profile = await ProfileCacheService.loadProfile();
     final pid = profile?['id'] as int?;
@@ -150,6 +154,7 @@ class HomeScreenState extends State<HomeScreen> {
       setState(() {
         _isDeviceRegistered = false;
         _deviceSerial = null;
+        _targetCharUuid = null;
         _deviceStateReady = true;
       });
       return;
@@ -159,6 +164,10 @@ class HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isDeviceRegistered = device != null;
       _deviceSerial = device?['serial'];
+      // 캐시 스키마에 맞게 키 후보들 체크
+      _targetCharUuid = device?['targetCharUuid'] ??
+          device?['charUuid'] ??
+          device?['characteristicUuid'];
       _deviceStateReady = true;
     });
   }
@@ -174,6 +183,7 @@ class HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  // ─────────── 통계 로딩 ───────────
   Future<void> _loadDailyStats() async {
     try {
       final profile = await ProfileCacheService.loadProfile();
@@ -281,6 +291,7 @@ class HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
+  // ─────────── 등록/스캔/연결 ───────────
   Future<void> _registerDevice() async {
     final result = await Navigator.push(
       context,
@@ -308,14 +319,18 @@ class HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+
     final int profileId = _profile!['id'];
     final topic = '/request_pair/$_deviceSerial';
     mqttService.publish(topic, {'profile_id': profileId.toString()});
     await Future.delayed(const Duration(milliseconds: 350));
 
+    // ✅ 하드코딩 없이 UUID 전달
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
-      MaterialPageRoute(builder: (_) => const BleScanScreen()),
+      MaterialPageRoute(
+        builder: (_) => BleScanScreen(targetCharUuid: _targetCharUuid),
+      ),
     );
     if (result == null) return;
 
@@ -332,13 +347,16 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _handleDisconnect() async {
-    await _connectedDevice?.disconnect();
+    try {
+      await _connectedDevice?.disconnect();
+    } catch (_) {}
     setState(() {
       _connectedDevice = null;
       _writableChar = null;
     });
   }
 
+  // ─────────── 모드 제어 ───────────
   void _setMode(ControlMode newMode) {
     final prev = _mode;
     if (prev == newMode) return;
@@ -458,6 +476,7 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ─────────── UI ───────────
   @override
   Widget build(BuildContext context) {
     if (_profile == null) {
@@ -592,8 +611,7 @@ class HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: _rightGap),
               SizedBox(
                 height: _rightCardHeight,
-                child:
-                _deviceStateReady ? _bleCard(isConnected) : _bleCardSkeleton(),
+                child: _deviceStateReady ? _bleCard(isConnected) : _bleCardSkeleton(),
               ),
             ],
           ),
@@ -644,41 +662,50 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _bleCard(bool isConnected) {
+    const double iconSize = 22;
+
     return RectCard(
       bgColor: headerGrey,
       child: Center(
         child: _isDeviceRegistered
-            ? (!isConnected
-            ? IconButton(
-          tooltip: '스캔',
-          onPressed: _requestPairAndScan,
-          icon: const Icon(Icons.bluetooth_searching),
-          color: Colors.white,
+            ? (
+            isConnected
+            // ✅ 연결됨: 아이콘을 탭하면 즉시 해제
+                ? GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () async {
+                await _handleDisconnect();
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('🔌 BLE 연결을 해제했습니다.')),
+                );
+              },
+              child: const Icon(
+                Icons.bluetooth_connected,
+                color: primaryBlue,
+                size: iconSize,
+              ),
+            )
+            // 미연결: 스캔 버튼
+                : IconButton(
+              tooltip: '스캔',
+              onPressed: _requestPairAndScan,
+              iconSize: iconSize,
+              icon: const Icon(Icons.bluetooth_searching),
+              color: Colors.white70,
+            )
         )
-            : Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.bluetooth_connected,
-                color: primaryBlue, size: 20),
-            const SizedBox(width: 6),
-            TextButton(
-              onPressed: _handleDisconnect,
-              child: const Text('해제',
-                  style:
-                  TextStyle(color: Colors.white70, fontSize: 12)),
-            ),
-          ],
-        ))
+        // 미등록: 등록 버튼
             : IconButton(
           tooltip: '기기 등록',
           onPressed: _registerDevice,
+          iconSize: iconSize,
           icon: const Icon(Icons.link),
-          color: Colors.white,
+          color: Colors.white70,
         ),
       ),
     );
   }
-
   Widget _bleCardSkeleton() {
     return RectCard(
       bgColor: headerGrey,
@@ -776,7 +803,6 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ===== 오늘 통계 카드 (도넛 + 오른쪽 정렬 텍스트 한 줄) =====
   Widget _buildTodayStatsCard() {
     final total = _goodSecToday + _badSecToday;
 
@@ -792,7 +818,7 @@ class HomeScreenState extends State<HomeScreen> {
         child: Row(
           children: [
             Padding(
-              padding: const EdgeInsets.only(left: 20), // ← 여기 숫자만 조절하면 됨
+              padding: const EdgeInsets.only(left: 20),
               child: SizedBox(width: 110, height: 110, child: _miniTodayPie()),
             ),
             const SizedBox(width: 28),
@@ -832,7 +858,6 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // 아이콘 점 + 라벨/값 (오른쪽 정렬, 한 줄)
   Widget _legendLine(Color dotColor, String label, String value) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
@@ -850,13 +875,12 @@ class HomeScreenState extends State<HomeScreen> {
           '$label : $value',
           style: const TextStyle(color: Colors.white, fontSize: 13),
           textAlign: TextAlign.right,
-          softWrap: false, // ← 줄바꿈 금지
+          softWrap: false,
         ),
       ],
     );
   }
 
-  // '총 시간: 7시간 10분' 한 줄
   Widget _rightInfoLine(String label, String value) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
@@ -865,7 +889,7 @@ class HomeScreenState extends State<HomeScreen> {
           '$label: $value',
           style: const TextStyle(color: Colors.white, fontSize: 12),
           textAlign: TextAlign.right,
-          softWrap: false, // ← 줄바꿈 금지
+          softWrap: false,
         ),
       ],
     );

@@ -1,3 +1,4 @@
+// lib/pages/ble_scan_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,49 +14,52 @@ class AppColors {
 }
 
 class BleScanScreen extends StatefulWidget {
-  const BleScanScreen({Key? key}) : super(key: key);
+  /// 있으면 이 UUID로 매칭, 없으면 자동 선택
+  final String? targetCharUuid;
+
+  const BleScanScreen({Key? key, this.targetCharUuid}) : super(key: key);
 
   @override
   State<BleScanScreen> createState() => _BleScanScreenState();
 }
 
 class _BleScanScreenState extends State<BleScanScreen> {
-  // 네이티브 GATT 캐시 리프레시용 MethodChannel
   static const _btChannel = MethodChannel('siseon2/bluetooth');
 
-  // 스캔된 기기 및 광고된 서비스 UUID 저장
   final Map<String, BluetoothDevice> _foundDevices = {};
   final Map<String, List<Guid>> _serviceUuids = {};
 
-  String? _selectedMac; // 로그 화면 전환 트리거
+  String? _selectedMac;
   final List<String> _logs = [];
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _writableChar;
 
-  static const String TARGET_CHAR_UUID =
-      "12345678-1234-5678-1234-56789abcdef1"; // 원하는 특성 UUID
-
-  // 스캔 상태/스트림 구독
   bool _isScanning = false;
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<bool>? _isScanningSub;
+  StreamSubscription<BluetoothConnectionState>? _connStateSub;
+
+  // ✅ 정상적으로 결과를 넘겨(핸드오프) 이 화면을 닫는지 여부
+  bool _handoff = false;
 
   @override
   void initState() {
     super.initState();
-    // 스캔 상태 구독
+
+    // 화면 내 플러그인 로그 억제 (필요 시 verbose로 바꿔 디버깅)
+    FlutterBluePlus.setLogLevel(LogLevel.none);
+
     _isScanningSub = FlutterBluePlus.isScanning.listen((s) {
       if (mounted) setState(() => _isScanning = s);
     });
-    // 스캔 결과 구독 (1회만)
+
     _scanSub = FlutterBluePlus.scanResults.listen((results) {
       if (!mounted) return;
       setState(() {
         for (final r in results) {
           final mac = r.device.id.id;
-          final name = r.device.name.toLowerCase();
-          // 이름에 'pi5' 포함된 기기만 노출
-          if (name.contains('pi5')) {
+          final name = (r.device.name.isNotEmpty ? r.device.name : '');
+          if (name.toLowerCase().contains('pi5')) {
             _foundDevices[mac] = r.device;
             _serviceUuids[mac] = r.advertisementData.serviceUuids;
           }
@@ -66,7 +70,6 @@ class _BleScanScreenState extends State<BleScanScreen> {
     _startScan();
   }
 
-  // ────────────────────────────── BLE 제어 ──────────────────────────────
   Future<void> _startScan() async {
     _foundDevices.clear();
     _serviceUuids.clear();
@@ -76,11 +79,9 @@ class _BleScanScreenState extends State<BleScanScreen> {
 
     try {
       await FlutterBluePlus.stopScan();
-      await FlutterBluePlus.startScan(
-        timeout: const Duration(seconds: 6),
-      );
+      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 6));
     } catch (e) {
-      _addLog('❌ startScan error: $e');
+      _addLog('❌ startScan error: ${_formatBleError(e)}');
     }
   }
 
@@ -88,7 +89,7 @@ class _BleScanScreenState extends State<BleScanScreen> {
     try {
       await FlutterBluePlus.stopScan();
     } catch (e) {
-      _addLog('❌ stopScan error: $e');
+      _addLog('❌ stopScan error: ${_formatBleError(e)}');
     }
   }
 
@@ -99,19 +100,8 @@ class _BleScanScreenState extends State<BleScanScreen> {
       _addLog(ok == true ? '✅ GATT cache cleared' : '⚠️ GATT cache clear failed');
       return ok ?? false;
     } catch (e) {
-      _addLog('❌ Cache clear error: $e');
+      _addLog('❌ Cache clear error: ${_formatBleError(e)}');
       return false;
-    }
-  }
-
-  Future<void> _refreshGattServices(BluetoothDevice device) async {
-    if (await _clearGattCache()) {
-      try {
-        final services = await device.discoverServices();
-        _addLog('🧪 Re-discovered services: ${services.length}');
-      } catch (e) {
-        _addLog('❌ Service rediscovery failed: $e');
-      }
     }
   }
 
@@ -128,50 +118,171 @@ class _BleScanScreenState extends State<BleScanScreen> {
     _connectedDevice = device;
     _addLog('🔌 Target device: $mac');
 
-    // 연결 여부 확인 후 연결
-    final state = await device.state.first;
-    if (state != BluetoothConnectionState.connected) {
+    // 연결 상태 실시간 로그
+    _connStateSub?.cancel();
+    _connStateSub = device.state.listen((s) {
+      _addLog('🔄 Device state: $s');
+    });
+
+    // 1) 연결
+    final current = await device.state.first;
+    if (current != BluetoothConnectionState.connected) {
       _addLog('🔗 Connecting...');
       try {
-        await device.connect(autoConnect: false, timeout: const Duration(seconds: 10));
+        await device.connect(
+          autoConnect: false,
+          timeout: const Duration(seconds: 10),
+        );
         _addLog('✅ Connected');
+      } on PlatformException catch (e) {
+        _addLog('❌ Connection failed (PlatformException): ${_formatPlatformException(e)}');
+        await _safeDisconnect(device);
+        await _clearGattCache(); // 일부 GATT 133 등 복구용
+        return;
       } catch (e) {
-        _addLog('❌ Connection failed: $e');
+        _addLog('❌ Connection failed: ${_formatBleError(e)}');
+        await _safeDisconnect(device);
         return;
       }
     } else {
       _addLog('ℹ️ Already connected');
     }
 
-    // GATT 캐시 리프레시 후 서비스 재탐색 2회
-    await _refreshGattServices(device);
-    await _refreshGattServices(device);
-
-    // 특성 검색
+    // 2) 연결 직후 안정화
     try {
-      final services = await device.discoverServices();
+      await device.requestConnectionPriority(
+        connectionPriorityRequest: ConnectionPriority.high,
+      );
+    } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 300));
+    try {
+      await device.requestMtu(247);
+    } catch (_) {}
+    await Future.delayed(const Duration(milliseconds: 150));
+
+    // 3) 서비스 탐색(1회)
+    List<BluetoothService> services = const [];
+    try {
+      services = await device.discoverServices();
+      _addLog('🧪 Discovered services: ${services.length}');
+    } on PlatformException catch (e) {
+      _addLog('❌ discoverServices failed (PlatformException): ${_formatPlatformException(e)}');
+      await _safeDisconnect(device);
+      return;
+    } catch (e) {
+      _addLog('❌ discoverServices failed: ${_formatBleError(e)}');
+      await _safeDisconnect(device);
+      return;
+    }
+
+    // 4) 캐릭터리스틱 선택 (원하는 UUID 우선, 없으면 RW>W)
+    try {
+      final want = widget.targetCharUuid?.toLowerCase().trim();
+
+      BluetoothCharacteristic? bestReadableWritable;
+      BluetoothCharacteristic? bestWritable;
+
       for (final s in services) {
         for (final c in s.characteristics) {
-          final uuid = c.uuid.toString().toLowerCase();
-          if (uuid == TARGET_CHAR_UUID && c.properties.write && c.properties.read) {
-            _writableChar = c;
-            _addLog('✅ Found writable+readable characteristic');
-            break;
+          final uuidLower = c.uuid.toString().toLowerCase();
+          final canWrite = c.properties.write || c.properties.writeWithoutResponse;
+          final canRead  = c.properties.read;
+
+          if (want != null && want.isNotEmpty) {
+            if (uuidLower == want && canWrite) {
+              _writableChar = c;
+              break;
+            }
+          } else {
+            if (canWrite && canRead && bestReadableWritable == null) {
+              bestReadableWritable = c;
+            }
+            if (canWrite && bestWritable == null) {
+              bestWritable = c;
+            }
           }
         }
         if (_writableChar != null) break;
       }
+
+      _writableChar ??= bestReadableWritable ?? bestWritable;
+
       if (_writableChar == null) {
-        _addLog('⚠️ Writable+Readable not found');
+        _addLog('⚠️ 쓸 수 있는 특성을 찾지 못했습니다. (write/read 속성 확인 필요)');
       } else {
+        _addLog('✅ Selected characteristic: ${_writableChar!.uuid}');
         if (!mounted) return;
+
+        // ✅ 결과 정상 전달 → 이 화면에서는 disconnect 하지 않음
+        _handoff = true;
+
         Navigator.pop(context, {
           'device': _connectedDevice,
           'writableChar': _writableChar,
+          'serviceUuid': _writableChar!.serviceUuid.toString(),
+          'charUuid': _writableChar!.uuid.toString(),
         });
       }
     } catch (e) {
-      _addLog('❌ Characteristic search failed: $e');
+      _addLog('❌ Characteristic search failed: ${_formatBleError(e)}');
+    }
+  }
+
+  Future<void> _safeDisconnect(BluetoothDevice d) async {
+    try {
+      await d.disconnect();
+      _addLog('🔌 Disconnected');
+    } catch (_) {}
+  }
+
+  String _formatBleError(Object e) {
+    if (e is PlatformException) {
+      return _formatPlatformException(e);
+    }
+    final msg = e.toString();
+    final status = _extractGattStatus(msg);
+    final hint = status != null ? _gattHint(status) : null;
+    return status == null ? msg : '$msg (status=$status${hint != null ? ", $hint" : ""})';
+  }
+
+  String _formatPlatformException(PlatformException e) {
+    final statusFromDetails = _extractGattStatus('${e.details}');
+    final statusFromMessage = _extractGattStatus('${e.message}');
+    final status = statusFromDetails ?? statusFromMessage;
+
+    final base = '[${e.code}] ${e.message ?? ''} ${e.details ?? ''}'.trim();
+    if (status == null) return base;
+
+    final hint = _gattHint(status);
+    return '$base (status=$status${hint != null ? ", $hint" : ""})';
+  }
+
+  int? _extractGattStatus(String text) {
+    final m = RegExp(r'(status|gatt|ATT)_?(code|status)?[=: ]+(-?\d+)').firstMatch(text);
+    if (m != null) {
+      return int.tryParse(m.group(3)!);
+    }
+    final n = RegExp(r'\b(133|62|8|22|19|257)\b').firstMatch(text);
+    if (n != null) return int.tryParse(n.group(1)!);
+    return null;
+  }
+
+  String? _gattHint(int status) {
+    switch (status) {
+      case 133:
+        return 'Android Generic GATT Error(133) — 캐시 문제일 수 있음. 다시 시도/캐시 초기화 권장';
+      case 8:
+        return 'GATT_CONN_TIMEOUT — 기기 응답 지연/거리/간섭 확인';
+      case 62:
+        return 'GATT_CONN_FAIL_ESTABLISH — 페어링/전원/거리 확인';
+      case 22:
+        return 'GATT_CONN_TERMINATE_PEER_USER — 상대가 연결 종료';
+      case 19:
+        return 'GATT_CONN_TERMINATE_LOCAL_HOST — 로컬이 연결 종료';
+      case 257:
+        return 'INSUFFICIENT AUTHENTICATION — 권한/페어링 필요';
+      default:
+        return null;
     }
   }
 
@@ -187,10 +298,16 @@ class _BleScanScreenState extends State<BleScanScreen> {
     _stopScan();
     _scanSub?.cancel();
     _isScanningSub?.cancel();
+    _connStateSub?.cancel();
+
+    // ✅ 정상 핸드오프가 아니면(사용자 취소/실패 등) 여기서 정리
+    if (!_handoff) {
+      _connectedDevice?.disconnect();
+    }
+
     super.dispose();
   }
 
-  // ────────────────────────────── UI ──────────────────────────────
   @override
   Widget build(BuildContext context) {
     final onLogView = _selectedMac != null;
@@ -201,13 +318,10 @@ class _BleScanScreenState extends State<BleScanScreen> {
         backgroundColor: AppColors.backgroundBlack,
         elevation: 0,
         centerTitle: true,
-
         foregroundColor: Colors.white,
         iconTheme: const IconThemeData(color: Colors.white, size: 22),
-
         leading: onLogView
             ? IconButton(
-          // ✅ 더 하얗고 크게
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 22),
           onPressed: () => setState(() => _selectedMac = null),
           splashRadius: 22,
@@ -225,7 +339,10 @@ class _BleScanScreenState extends State<BleScanScreen> {
           if (!onLogView)
             IconButton(
               tooltip: _isScanning ? 'Stop scan' : 'Start scan',
-              icon: Icon(_isScanning ? Icons.stop_circle_outlined : Icons.refresh, color: Colors.white70),
+              icon: Icon(
+                _isScanning ? Icons.stop_circle_outlined : Icons.refresh,
+                color: Colors.white70,
+              ),
               onPressed: () => _isScanning ? _stopScan() : _startScan(),
             ),
         ],
@@ -245,11 +362,13 @@ class _BleScanScreenState extends State<BleScanScreen> {
             onPressed: () => _isScanning ? _stopScan() : _startScan(),
             icon: _isScanning
                 ? const SizedBox(
-              width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
             )
                 : const Icon(Icons.bluetooth_searching, color: Colors.white),
             label: const Text(
-              '스캔 시작', // 버튼 텍스트는 상태에 따라 아래에서 바꿔도 됨
+              '스캔 시작',
               style: TextStyle(fontWeight: FontWeight.w700, fontFamily: 'Pretendard'),
             ),
             style: ElevatedButton.styleFrom(
@@ -263,14 +382,12 @@ class _BleScanScreenState extends State<BleScanScreen> {
     );
   }
 
-  // ────────────────────────────── Views ──────────────────────────────
   Widget _deviceListView() {
     final devices = _foundDevices.entries.toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 상태 배지
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
@@ -293,12 +410,8 @@ class _BleScanScreenState extends State<BleScanScreen> {
           ),
         ),
         const SizedBox(height: 16),
-
-        // 리스트
         if (devices.isEmpty)
-          Expanded(
-            child: _emptyState(),
-          )
+          Expanded(child: _emptyState())
         else
           Expanded(
             child: ListView.separated(
@@ -328,7 +441,6 @@ class _BleScanScreenState extends State<BleScanScreen> {
                     ),
                     child: Row(
                       children: [
-                        // 아이콘
                         Container(
                           width: 44,
                           height: 44,
@@ -340,7 +452,6 @@ class _BleScanScreenState extends State<BleScanScreen> {
                           child: const Icon(Icons.bluetooth, color: AppColors.primaryBlue),
                         ),
                         const SizedBox(width: 12),
-                        // 텍스트들
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -392,7 +503,6 @@ class _BleScanScreenState extends State<BleScanScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 타겟 기기 표시
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -415,7 +525,6 @@ class _BleScanScreenState extends State<BleScanScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        // 로그 리스트
         Expanded(
           child: Container(
             decoration: BoxDecoration(
@@ -454,7 +563,6 @@ class _BleScanScreenState extends State<BleScanScreen> {
     );
   }
 
-  // ────────────────────────────── Widgets ──────────────────────────────
   Widget _dot(Color c) => Container(
     width: 10,
     height: 10,

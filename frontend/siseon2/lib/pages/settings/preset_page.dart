@@ -312,12 +312,17 @@ class _PresetPageState extends State<PresetPage> {
       backgroundColor: backgroundBlack,
       appBar: AppBar(
         backgroundColor: backgroundBlack,
-        foregroundColor: primaryBlue,
         elevation: 0,
         centerTitle: true,
-        title: const Text('프리셋', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          '프리셋',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: Colors.white, // ✅ 흰색 고정
+          ),
+        ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: const Icon(Icons.arrow_back, color: primaryBlue), // 🔵 아이콘만 블루
           onPressed: () => Navigator.pop(context, true),
         ),
       ),
@@ -338,31 +343,6 @@ class _PresetPageState extends State<PresetPage> {
                     _buildSquareAddButton(),
                   ],
                 ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-              child: SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton(
-                  onPressed: () {
-                    // 🔵 pop 전에 루트 스낵바로 안내(컨텍스트 안전)
-                    final rootCtx = navigatorKey.currentContext;
-                    if (rootCtx != null) {
-                      ScaffoldMessenger.of(rootCtx).showSnackBar(
-                        const SnackBar(content: Text('✅ 저장되었습니다')),
-                      );
-                    }
-                    Navigator.pop(context, true);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryBlue,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  child: const Text('저장', style: TextStyle(fontSize: 16, color: Colors.white)),
-                ),
               ),
             ),
           ],
@@ -449,7 +429,7 @@ class _PresetPageState extends State<PresetPage> {
           width: 60,
           height: 60,
           decoration: BoxDecoration(
-            color: primaryBlue,
+            color: Colors.grey[800], // 🔹 회색 버튼
             borderRadius: BorderRadius.circular(14),
           ),
           child: const Icon(Icons.add, color: Colors.white, size: 32),
