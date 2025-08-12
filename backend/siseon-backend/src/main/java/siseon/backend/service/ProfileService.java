@@ -84,7 +84,13 @@ public class ProfileService {
 
     public void updateFcmToken(Long id, String fcmToken, User user) {
         Profile profile = getOwnedProfile(id, user);
-        profile.setFcmToken(fcmToken);
+
+        if (fcmToken != null) {
+            // 등록 시에는 중복 제거
+            profileRepository.clearSameTokenFromOthers(fcmToken, id);
+        }
+
+        profile.setFcmToken(fcmToken);  // null 전달 시에는 단순 제거
     }
 
     private Profile getOwnedProfile(Long id, User user) {

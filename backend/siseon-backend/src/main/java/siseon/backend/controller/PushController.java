@@ -20,9 +20,9 @@ public class PushController {
     private final PushNotificationService pushService;
     private final UserRepository userRepository;
 
-    private User getUser(Jwt jwt) {
+    private User getUserFromJwt(Jwt jwt) {
         return userRepository.findByEmail(jwt.getSubject())
-                .orElseThrow(() -> new RuntimeException("User not found"));
+                .orElseThrow(() -> new RuntimeException("사용자를 찾을 수 없습니다."));
     }
 
     @PostMapping("/register")
@@ -31,8 +31,18 @@ public class PushController {
             @RequestParam Long profileId,
             @RequestParam String fcmToken) {
 
-        User me = getUser(jwt);
+        User me = getUserFromJwt(jwt);
         profileService.updateFcmToken(profileId, fcmToken, me);
+        return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/unregister")
+    public ResponseEntity<Void> unregisterToken(
+            @AuthenticationPrincipal Jwt jwt,
+            @RequestParam Long profileId) {
+
+        User me = getUserFromJwt(jwt);
+        profileService.updateFcmToken(profileId, null, me);
         return ResponseEntity.ok().build();
     }
 
@@ -41,14 +51,16 @@ public class PushController {
             @AuthenticationPrincipal Jwt jwt,
             @RequestParam Long profileId) {
 
-        User me = getUser(jwt);
+        User me = getUserFromJwt(jwt);
         ProfileResponse dto = profileService.getProfileById(profileId, me);
 
-        pushService.sendPushAsync(
-                dto.getFcmToken(),
-                "테스트 알림",
-                "비동기 FCM 전송이 동작합니다."
-        );
+        if (dto.getFcmToken() != null) {
+            pushService.sendPushAsync(
+                    dto.getFcmToken(),
+                    "테스트 알림",
+                    "비동기 FCM 전송이 동작합니다."
+            );
+        }
 
         return ResponseEntity.ok(dto);
     }
