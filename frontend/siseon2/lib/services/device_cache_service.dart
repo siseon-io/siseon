@@ -107,12 +107,13 @@ class DeviceCacheService {
       throw ArgumentError('serial(혹은 serialNumber)이 없습니다.');
     }
     final s = serial.toString();
+
     await prefs.setString(_serialKey(profileId), s);
     await prefs.setBool(_regKey(profileId), true);
 
-    // 🔁 레거시 키도 함께 세팅(다른 화면 호환)
-    await prefs.setString('deviceSerial', s);
-    await prefs.setBool('isDeviceRegistered', true);
+    // ❌ 레거시 키는 더 이상 건드리지 않음
+    // await prefs.setString('deviceSerial', s);
+    // await prefs.setBool('isDeviceRegistered', true);
   }
 
   static Future<Map<String, dynamic>?> loadDeviceForProfile(int profileId) async {
@@ -129,6 +130,10 @@ class DeviceCacheService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_serialKey(profileId));
     await prefs.setBool(_regKey(profileId), false);
+
+    // ✅ 레거시 키도 함께 정리(안 쓰더라도 혹시 참조하는 화면 대비)
+    await prefs.remove('deviceSerial');
+    await prefs.setBool('isDeviceRegistered', false);
   }
 
   // ── 호환용(현재 프로필 기준) ───────────────────────────────────────────

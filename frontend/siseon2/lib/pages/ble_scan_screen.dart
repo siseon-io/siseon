@@ -45,6 +45,12 @@ class _BleScanScreenState extends State<BleScanScreen> {
   // ✅ 정상적으로 결과를 넘겨(핸드오프) 이 화면을 닫는지 여부
   bool _handoff = false;
 
+  // 표준 서비스(무시 대상)
+  static const Set<String> _ignoreSvc = {
+    '00001800-0000-1000-8000-00805f9b34fb', // Generic Access
+    '00001801-0000-1000-8000-00805f9b34fb', // Generic Attribute
+  };
+
   @override
   void initState() {
     super.initState();
@@ -65,6 +71,12 @@ class _BleScanScreenState extends State<BleScanScreen> {
           if (name.toLowerCase().contains('pi5')) {
             _foundDevices[mac] = r.device;
             _serviceUuids[mac] = r.advertisementData.serviceUuids;
+
+            // 콘솔에도 광고 UUID를 즉시 찍어줌
+            final adv = r.advertisementData.serviceUuids
+                .map((g) => g.toString().toLowerCase())
+                .toList();
+            debugPrint('ADV uuids($mac): ${adv.join(', ')}');
           }
         }
       });
@@ -108,6 +120,24 @@ class _BleScanScreenState extends State<BleScanScreen> {
     }
   }
 
+  // 광고에서 온 UUID 중 커스텀(비표준) 서비스 후보 1개 뽑기
+  String? _pickCustomAdvSvc(List<Guid> advUuids) {
+    for (final g in advUuids) {
+      final s = g.toString().toLowerCase();
+      // 표준 16-bit 확장 형태/무시 목록 제외
+      if (_ignoreSvc.contains(s)) continue;
+      if (_looksLike16BitBase(s)) continue;
+      return s; // 커스텀 128-bit로 판단
+    }
+    return null;
+  }
+
+  bool _looksLike16BitBase(String uuidLower) {
+    // 16-bit 확장: 0000XXXX-0000-1000-8000-00805f9b34fb
+    return RegExp(r'^0000[0-9a-f]{4}-0000-1000-8000-00805f9b34fb$')
+        .hasMatch(uuidLower);
+  }
+
   Future<void> _onSelectDevice(String mac) async {
     setState(() {
       _selectedMac = mac;
@@ -120,6 +150,26 @@ class _BleScanScreenState extends State<BleScanScreen> {
 
     _connectedDevice = device;
     _addLog('🔌 Target device: $mac');
+
+    // 🔎 광고에 실린 서비스 UUID들 출력 + 커스텀 서비스 힌트 추출
+    final advUuids = _serviceUuids[mac] ?? const [];
+    String? advSvcHint;
+    if (advUuids.isEmpty) {
+      _addLog('📣 ADV.serviceUuids = [] (광고에 UUID 미포함/OS 캐시 이슈 가능)');
+    } else {
+      final advList = advUuids.map((g) => g.toString().toLowerCase()).toList();
+      _addLog('📣 ADV.serviceUuids = [${advList.join(', ')}]');
+      advSvcHint = _pickCustomAdvSvc(advUuids);
+      if (advSvcHint != null) {
+        _addLog('🔎 advSvcHint = $advSvcHint');
+      }
+    }
+
+    // 🔎 외부에서 타겟 캐릭터 UUID가 들어왔다면 표시 (우선권 가짐)
+    final wantChar = widget.targetCharUuid?.toLowerCase().trim();
+    if (wantChar != null && wantChar.isNotEmpty) {
+      _addLog('🎯 targetCharUuid (external) = $wantChar');
+    }
 
     // 연결 상태 실시간 로그
     _connStateSub?.cancel();
@@ -168,6 +218,18 @@ class _BleScanScreenState extends State<BleScanScreen> {
     try {
       services = await device.discoverServices();
       _addLog('🧪 Discovered services: ${services.length}');
+
+      // 🔎 각 서비스/캐릭터 전부 덤프
+      for (final s in services) {
+        _addLog('🧩 Service: ${s.uuid.toString().toLowerCase()} '
+            '(${s.characteristics.length} chars)');
+        for (final c in s.characteristics) {
+          final p = c.properties;
+          _addLog('   └─ Char: ${c.uuid.toString().toLowerCase()} '
+              '[read=${p.read}, write=${p.write}, writeNR=${p.writeWithoutResponse}, '
+              'notify=${p.notify}, indicate=${p.indicate}]');
+        }
+      }
     } on PlatformException catch (e) {
       _addLog('❌ discoverServices failed (PlatformException): ${_formatPlatformException(e)}');
       await _safeDisconnect(device);
@@ -178,21 +240,45 @@ class _BleScanScreenState extends State<BleScanScreen> {
       return;
     }
 
-    // 4) 캐릭터리스틱 선택 (원하는 UUID 우선, 없으면 RW>W)
+    // 4) 서비스/캐릭터 선택 로직
     try {
-      final want = widget.targetCharUuid?.toLowerCase().trim();
+      // 4-1) 선호 서비스 집합 만들기: 광고 힌트 > 비표준(커스텀) 서비스
+      List<BluetoothService> preferredServices = [];
 
+      if (advSvcHint != null) {
+        final match = services.where((s) =>
+        s.uuid.toString().toLowerCase() == advSvcHint);
+        preferredServices.addAll(match);
+      }
+
+      if (preferredServices.isEmpty) {
+        preferredServices = services.where((s) {
+          final su = s.uuid.toString().toLowerCase();
+          return !_ignoreSvc.contains(su) && !_looksLike16BitBase(su);
+        }).toList();
+      }
+
+      // 폴백: 그래도 없으면 전체 사용
+      final searchSpace = preferredServices.isNotEmpty
+          ? preferredServices
+          : services;
+
+      // 4-2) 캐릭터 선택
       BluetoothCharacteristic? bestReadableWritable;
       BluetoothCharacteristic? bestWritable;
 
-      for (final s in services) {
+      for (final s in searchSpace) {
+        final svcLower = s.uuid.toString().toLowerCase();
+        if (_ignoreSvc.contains(svcLower)) continue;
+
         for (final c in s.characteristics) {
           final uuidLower = c.uuid.toString().toLowerCase();
           final canWrite = c.properties.write || c.properties.writeWithoutResponse;
           final canRead  = c.properties.read;
 
-          if (want != null && want.isNotEmpty) {
-            if (uuidLower == want && canWrite) {
+          // 외부에서 특정 char 요구하면 그것부터
+          if (wantChar != null && wantChar.isNotEmpty) {
+            if (uuidLower == wantChar && canWrite) {
               _writableChar = c;
               break;
             }
@@ -213,11 +299,16 @@ class _BleScanScreenState extends State<BleScanScreen> {
       if (_writableChar == null) {
         _addLog('⚠️ 쓸 수 있는 특성을 찾지 못했습니다. (write/read 속성 확인 필요)');
       } else {
-        _addLog('✅ Selected characteristic: ${_writableChar!.uuid}');
+        // ✅ 선택 결과 자세히 출력 (service + char UUID)
+        final c = _writableChar!;
+        final p = c.properties;
+        final svcUuid  = c.serviceUuid.toString().toLowerCase();
+        final charUuid = c.uuid.toString().toLowerCase();
 
-        // 🔎 특성 속성 로그
-        final p = _writableChar!.properties;
-        _addLog('🧷 Char props → read=${p.read}, write=${p.write}, writeNR=${p.writeWithoutResponse}, notify=${p.notify}, indicate=${p.indicate}');
+        _addLog('✅ Selected service: $svcUuid');
+        _addLog('✅ Selected characteristic: $charUuid');
+        _addLog('🧷 Char props → read=${p.read}, write=${p.write}, '
+            'writeNR=${p.writeWithoutResponse}, notify=${p.notify}, indicate=${p.indicate}');
 
         // 🔒 링크 검증 (read 또는 notify on/off)
         final verified = await _verifyLink(_connectedDevice!, _writableChar!);
@@ -237,8 +328,8 @@ class _BleScanScreenState extends State<BleScanScreen> {
         Navigator.pop(context, {
           'device': _connectedDevice,
           'writableChar': _writableChar,
-          'serviceUuid': _writableChar!.serviceUuid.toString(),
-          'charUuid': _writableChar!.uuid.toString(),
+          'serviceUuid': c.serviceUuid.toString(),
+          'charUuid': c.uuid.toString(),
         });
       }
     } catch (e) {
@@ -334,6 +425,7 @@ class _BleScanScreenState extends State<BleScanScreen> {
   }
 
   void _addLog(String msg) {
+    debugPrint(msg); // 콘솔(Logcat)에도 같이 출력
     setState(() {
       _logs.insert(0, msg);
       if (_logs.length > 200) _logs.removeLast();

@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 import '../../services/auth_service.dart';
 import '../../profile_select_screen.dart';
 import '../../services/profile_cache_service.dart';
-
+import 'dart:math' as math;
 /// 🎨 공통 색상
 class AppColors {
   static const background = Color(0xFF0D1117); // 전체 배경
@@ -257,86 +257,127 @@ class _EditProfilePageState extends State<EditProfilePage> {
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.card,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          height: 380,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '아바타 선택',
-                style: TextStyle(
-                  fontFamily: 'Pretendard',
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.text,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: GridView.builder(
-                  shrinkWrap: true,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
-                  ),
-                  // 첫 칸은 "없음(null)"
-                  itemCount: 1 + _avatarAssets.length,
-                  itemBuilder: (context, index) {
-                    final String? path = (index == 0) ? null : _avatarAssets[index - 1];
-                    final isSelected = path == _selectedImage;
+        final media = MediaQuery.of(ctx);
+        final sheetHeight = math.min(media.size.height * 0.65, 480.0);
 
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() => _selectedImage = path);
-                        Navigator.pop(ctx);
-                      },
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: isSelected ? AppColors.primary : AppColors.border,
-                                width: isSelected ? 3 : 1,
-                              ),
-                            ),
-                            child: CircleAvatar(
-                              radius: 40,
-                              backgroundColor: const Color(0xFF1F2937),
-                              backgroundImage: path != null ? AssetImage(path) : null,
-                              child: path == null
-                                  ? const Icon(Icons.person_off, size: 30, color: Colors.grey)
-                                  : null,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          const SizedBox( // 생성 화면처럼 라벨 비표시
-                            height: 16,
-                            child: Text(
-                              '',
-                              style: TextStyle(color: AppColors.textSub, fontSize: 13),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
+        return SizedBox(
+          height: sheetHeight,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '아바타 선택',
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.text,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+
+                // ✅ 반응형 그리드
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final double maxW = constraints.maxWidth;
+
+                      // 화면 폭 기준 칸 수
+                      int crossAxisCount;
+                      if (maxW < 360) {
+                        crossAxisCount = 3;
+                      } else if (maxW < 520) {
+                        crossAxisCount = 4;
+                      } else if (maxW < 720) {
+                        crossAxisCount = 5;
+                      } else {
+                        crossAxisCount = 6;
+                      }
+
+                      const double spacing = 16;
+                      final double tileWidth =
+                          (maxW - spacing * (crossAxisCount - 1)) / crossAxisCount;
+
+                      // 원(테두리 포함) 지름
+                      final double avatarOuter = math.min(tileWidth, 100);
+                      const double borderSelected = 3;
+                      const double borderNormal = 1;
+
+                      // 셀 높이 (원 + 여유)
+                      final double tileExtent = avatarOuter + 8;
+
+                      return GridView.builder(
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: crossAxisCount,
+                          crossAxisSpacing: spacing,
+                          mainAxisSpacing: spacing,
+                          mainAxisExtent: tileExtent,
+                        ),
+                        // +1: "없음(null)" 옵션
+                        itemCount: 1 + _avatarAssets.length,
+                        itemBuilder: (context, index) {
+                          final String? path =
+                          (index == 0) ? null : _avatarAssets[index - 1];
+                          final bool isSelected = path == _selectedImage;
+                          final double borderWidth =
+                          isSelected ? borderSelected : borderNormal;
+
+                          // 실제 아바타 반지름 = (외곽원/2) - 테두리
+                          final double radius = avatarOuter / 2 - borderWidth;
+
+                          return GestureDetector(
+                            onTap: () {
+                              setState(() => _selectedImage = path);
+                              Navigator.pop(ctx);
+                            },
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  width: avatarOuter,
+                                  height: avatarOuter,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: isSelected
+                                          ? AppColors.primary
+                                          : AppColors.border,
+                                      width: borderWidth,
+                                    ),
+                                  ),
+                                  child: CircleAvatar(
+                                    radius: radius,
+                                    backgroundColor: const Color(0xFF1F2937),
+                                    backgroundImage:
+                                    path != null ? AssetImage(path) : null,
+                                    child: path == null
+                                        ? const Icon(Icons.person_off,
+                                        size: 30, color: Colors.grey)
+                                        : null,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
     );
   }
-
   Future<void> _save() async {
     final t = await AuthService.getValidAccessToken();
     if (t == null || _profileId == null) return;

@@ -28,7 +28,7 @@ class StatsService {
       if (year != null) 'year': '$year',
     };
 
-    final uri = Uri.http(_base, '/api/posture-stats', qp);
+    final uri = Uri.parse('$_base/api/posture-stats').replace(queryParameters: qp);
     print('[StatsService] 요청 URL: $uri');
 
     final res = await http.get(
