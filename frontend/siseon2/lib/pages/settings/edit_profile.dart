@@ -263,7 +263,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
       ),
       builder: (ctx) {
         final media = MediaQuery.of(ctx);
-        final sheetHeight = math.min(media.size.height * 0.65, 480.0);
+        final sheetHeight = math.min(media.size.height * 0.40, 400.0);
 
         return SizedBox(
           height: sheetHeight,
@@ -284,57 +284,44 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 const SizedBox(height: 16),
 
                 // ✅ 반응형 그리드
+                // ✅ 3칸 고정 + 스크롤 (2줄 노출은 시트 높이로 제어)
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
+                      const int crossAxisCount = 3;     // ✅ 항상 3칸
+                      const double spacing = 12;        // ✅ 동일 간격
                       final double maxW = constraints.maxWidth;
 
-                      // 화면 폭 기준 칸 수
-                      int crossAxisCount;
-                      if (maxW < 360) {
-                        crossAxisCount = 3;
-                      } else if (maxW < 520) {
-                        crossAxisCount = 4;
-                      } else if (maxW < 720) {
-                        crossAxisCount = 5;
-                      } else {
-                        crossAxisCount = 6;
-                      }
-
-                      const double spacing = 16;
                       final double tileWidth =
                           (maxW - spacing * (crossAxisCount - 1)) / crossAxisCount;
 
-                      // 원(테두리 포함) 지름
-                      final double avatarOuter = math.min(tileWidth, 100);
+                      // ✅ 원(외곽 포함) 지름을 동일 cap으로
+                      final double avatarOuter = math.min(tileWidth, 84);
                       const double borderSelected = 3;
                       const double borderNormal = 1;
 
-                      // 셀 높이 (원 + 여유)
-                      final double tileExtent = avatarOuter + 8;
+                      final double tileExtent = avatarOuter + 4;
 
                       return GridView.builder(
+                        padding: EdgeInsets.zero,
+                        physics: const ClampingScrollPhysics(), // 스크롤 가능
+                        primary: false,
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: crossAxisCount,
                           crossAxisSpacing: spacing,
                           mainAxisSpacing: spacing,
                           mainAxisExtent: tileExtent,
                         ),
-                        // +1: "없음(null)" 옵션
-                        itemCount: 1 + _avatarAssets.length,
+                        itemCount: 1 + _avatarAssets.length, // +1: '없음'
                         itemBuilder: (context, index) {
-                          final String? path =
-                          (index == 0) ? null : _avatarAssets[index - 1];
-                          final bool isSelected = path == _selectedImage;
-                          final double borderWidth =
-                          isSelected ? borderSelected : borderNormal;
-
-                          // 실제 아바타 반지름 = (외곽원/2) - 테두리
+                          final String? path = (index == 0) ? null : _avatarAssets[index - 1];
+                          final bool isSelected = path == _selectedImage /* or _selectedAvatar */;
+                          final double borderWidth = isSelected ? borderSelected : borderNormal;
                           final double radius = avatarOuter / 2 - borderWidth;
 
                           return GestureDetector(
                             onTap: () {
-                              setState(() => _selectedImage = path);
+                              setState(() => _selectedImage /* or _selectedAvatar */ = path);
                               Navigator.pop(ctx);
                             },
                             child: Column(
@@ -346,20 +333,16 @@ class _EditProfilePageState extends State<EditProfilePage> {
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
                                     border: Border.all(
-                                      color: isSelected
-                                          ? AppColors.primary
-                                          : AppColors.border,
+                                      color: isSelected ? AppColors.primary : AppColors.border,
                                       width: borderWidth,
                                     ),
                                   ),
                                   child: CircleAvatar(
                                     radius: radius,
                                     backgroundColor: const Color(0xFF1F2937),
-                                    backgroundImage:
-                                    path != null ? AssetImage(path) : null,
+                                    backgroundImage: path != null ? AssetImage(path) : null,
                                     child: path == null
-                                        ? const Icon(Icons.person_off,
-                                        size: 30, color: Colors.grey)
+                                        ? const Icon(Icons.person_off, size: 24, color: Colors.grey)
                                         : null,
                                   ),
                                 ),
