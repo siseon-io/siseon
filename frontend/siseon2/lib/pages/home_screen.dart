@@ -16,13 +16,14 @@ import 'package:siseon2/services/preset_service.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
 import 'package:siseon2/services/device_cache_service.dart';
 import 'package:siseon2/services/stats_service.dart';
+import 'package:siseon2/services/ble_session.dart'; // ✅ 세션 기반으로 상태 반영
 
 import 'package:siseon2/pages/ble_scan_screen.dart';
 import 'package:siseon2/pages/device_register_page.dart';
 import 'package:siseon2/pages/settings/preset_page.dart';
 import 'package:siseon2/pages/settings/stats_page.dart';
 import 'package:siseon2/pages/settings/edit_profile.dart';
-
+import 'package:siseon2/pages/settings/settings_page.dart';
 import 'package:siseon2/widgets/rect_card.dart';
 
 enum PostureBannerStatus { good, bad, none }
@@ -69,6 +70,7 @@ class HomeScreenState extends State<HomeScreen> {
   String? _deviceSerial;
   String? _targetCharUuid; // ✅ 디바이스 캐시에서 동적 로드
 
+  // 🔗 세션에서 복사해서 UI 표시용으로만 씀(소스 오브 트루스는 bleSession)
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _writableChar;
 
@@ -82,6 +84,19 @@ class HomeScreenState extends State<HomeScreen> {
   bool _loadingPosture = false;
   PostureBannerStatus _postureStatus = PostureBannerStatus.none;
 
+  // ─────────── 세션 리스너 ───────────
+  bool get _bleReady => bleSession.isReady;
+
+  void _copyFromSession() {
+    _connectedDevice = bleSession.device;
+    _writableChar = bleSession.char;
+  }
+
+  void _onBleSessionChanged() {
+    if (!mounted) return;
+    setState(_copyFromSession);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -93,6 +108,10 @@ class HomeScreenState extends State<HomeScreen> {
     _loadLatestPosture();
     _postureTimer =
         Timer.periodic(const Duration(minutes: 5), (_) => _loadLatestPosture());
+
+    // ✅ 세션 구독
+    bleSession.addListener(_onBleSessionChanged);
+    _copyFromSession();
   }
 
   @override
@@ -112,6 +131,7 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _postureTimer?.cancel();
+    bleSession.removeListener(_onBleSessionChanged);
     super.dispose();
   }
 
@@ -164,7 +184,6 @@ class HomeScreenState extends State<HomeScreen> {
     setState(() {
       _isDeviceRegistered = device != null;
       _deviceSerial = device?['serial'];
-      // 캐시 스키마에 맞게 키 후보들 체크
       _targetCharUuid = device?['targetCharUuid'] ??
           device?['charUuid'] ??
           device?['characteristicUuid'];
@@ -319,7 +338,6 @@ class HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-
     final int profileId = _profile!['id'];
     final topic = '/request_pair/$_deviceSerial';
     mqttService.publish(topic, {'profile_id': profileId.toString()});
@@ -332,28 +350,39 @@ class HomeScreenState extends State<HomeScreen> {
         builder: (_) => BleScanScreen(targetCharUuid: _targetCharUuid),
       ),
     );
-    if (result == null) return;
 
-    setState(() {
-      _connectedDevice = result['device'] as BluetoothDevice;
-      _writableChar = result['writableChar'] as BluetoothCharacteristic;
-    });
+    // ⬇️ 세션 우선으로 연결 성공 판단
+    if (bleSession.isReady) {
+      setState(_copyFromSession);
+      widget.onConnect?.call(bleSession.char!);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ BLE 연결 성공')),
+        );
+      }
+      return;
+    }
 
-    widget.onConnect?.call(_writableChar!);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('✅ BLE 연결 성공')),
-    );
+    // 세션이 준비 안됐는데 result가 있으면 fallback
+    if (result != null) {
+      setState(() {
+        _connectedDevice = result['device'] as BluetoothDevice?;
+        _writableChar = result['writableChar'] as BluetoothCharacteristic?;
+      });
+      if (_writableChar != null) {
+        widget.onConnect?.call(_writableChar!);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('✅ BLE 연결 성공')),
+          );
+        }
+      }
+    }
   }
 
   Future<void> _handleDisconnect() async {
-    try {
-      await _connectedDevice?.disconnect();
-    } catch (_) {}
-    setState(() {
-      _connectedDevice = null;
-      _writableChar = null;
-    });
+    await bleSession.disconnect(); // ✅ 세션 기준 해제
+    setState(_copyFromSession);
   }
 
   // ─────────── 모드 제어 ───────────
@@ -486,7 +515,7 @@ class HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    final isConnected = _connectedDevice != null;
+    final isConnected = _bleReady; // ✅ 세션 기준
 
     return Scaffold(
       backgroundColor: backgroundBlack,
@@ -706,6 +735,7 @@ class HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
   Widget _bleCardSkeleton() {
     return RectCard(
       bgColor: headerGrey,

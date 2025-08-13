@@ -1,4 +1,6 @@
 // 📁 lib/main.dart
+import 'dart:io'; // ← 플랫폼 가드용
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -9,6 +11,10 @@ import 'package:siseon2/services/profile_cache_service.dart';
 import 'package:siseon2/services/device_cache_service.dart';
 import 'package:siseon2/services/fcm_service.dart';
 import 'package:intl/date_symbol_data_local.dart';
+
+// ⬇️ Foreground service & permission
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '/login_screen.dart';
 import '/profile_select_screen.dart';
@@ -23,13 +29,49 @@ Future<void> main() async {
 
   // ✅ Firebase & FCM를 가장 먼저 세팅
   await Firebase.initializeApp();
-  await FCMService.initialize();        // ⬅️ 여기서 설정(중요)
+  await FCMService.initialize(); // ⬅️ 여기서 설정(중요)
+
+  // ✅ ForegroundTask 초기화 (v9.x: await 금지, const 금지)
+  FlutterForegroundTask.init(
+    androidNotificationOptions: AndroidNotificationOptions(
+      channelId: 'siseon_ble_channel',
+      channelName: 'Siseon BLE 연결 유지',
+      channelDescription: 'BLE 연결을 백그라운드에서 안정적으로 유지합니다.',
+      channelImportance: NotificationChannelImportance.LOW,
+      priority: NotificationPriority.LOW,
+      playSound: false,
+      enableVibration: false,
+      visibility: NotificationVisibility.VISIBILITY_PUBLIC,
+    ),
+    iosNotificationOptions: IOSNotificationOptions(), // iOS는 사용 안 함
+    foregroundTaskOptions: ForegroundTaskOptions(
+      // v9.x: interval 대신 eventAction 사용
+      eventAction: ForegroundTaskEventAction.repeat(15000),
+      allowWakeLock: true,
+      allowWifiLock: true,
+      autoRunOnBoot: false,
+      autoRunOnMyPackageReplaced: false,
+    ),
+  );
+
+  // ✅ Android 13+ 알림 권한 (포그라운드 서비스 알림 표시용)
+  if (Platform.isAndroid) {
+    final notif = await Permission.notification.status;
+    if (notif.isDenied || notif.isPermanentlyDenied) {
+      await Permission.notification.request();
+    }
+  }
 
   // ✅ 나머지 초기화
   await mqttService.connect();
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
-  runApp(const MyApp());
+  // ✅ ForegroundTask가 동작하려면 이 래퍼로 감싸서 runApp
+  runApp(
+    WithForegroundTask(
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
@@ -66,8 +108,6 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> initApp() async {
     // ⏳ 간단한 스플래시 연출
     await Future.delayed(const Duration(seconds: 2));
-
-    // ❌ 여기서 FCMService.initialize() 호출하던 거 제거함
 
     // ✅ 로그인 여부 확인
     final token = await AuthService.getValidAccessToken();

@@ -1,4 +1,6 @@
+// lib/pages/profile_create_screen.dart
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart'; // rootBundle, InputFormatters
@@ -109,10 +111,10 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
               builder: (ctx, setModalState) {
                 final yearCount = endYear - startYear + 1;
                 final daysInMonth = DateTime(
-                    selectedMonth == 12 ? selectedYear + 1 : selectedYear,
-                    selectedMonth == 12 ? 1 : selectedMonth + 1,
-                    0)
-                    .day;
+                  selectedMonth == 12 ? selectedYear + 1 : selectedYear,
+                  selectedMonth == 12 ? 1 : selectedMonth + 1,
+                  0,
+                ).day;
                 if (selectedDay > daysInMonth) {
                   selectedDay = daysInMonth;
                 }
@@ -123,9 +125,10 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                     const Text(
                       '생년월일 선택',
                       style: TextStyle(
-                          color: AppColors.text,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600),
+                        color: AppColors.text,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     SizedBox(
@@ -136,8 +139,8 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                           Expanded(
                             child: CupertinoPicker(
                               scrollController: FixedExtentScrollController(
-                                initialItem:
-                                (selectedYear - startYear).clamp(0, yearCount - 1),
+                                initialItem: (selectedYear - startYear)
+                                    .clamp(0, yearCount - 1),
                               ),
                               itemExtent: 40,
                               onSelectedItemChanged: (index) {
@@ -150,8 +153,9 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                                     (i) => Center(
                                   child: Text(
                                     '${startYear + i}년',
-                                    style:
-                                    const TextStyle(color: AppColors.text),
+                                    style: const TextStyle(
+                                      color: AppColors.text,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -174,19 +178,21 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                                     (i) => Center(
                                   child: Text(
                                     '${i + 1}월',
-                                    style:
-                                    const TextStyle(color: AppColors.text),
+                                    style: const TextStyle(
+                                      color: AppColors.text,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
                           ),
-                          // Day (1~해당 월의 일수)
+                          // Day
                           Expanded(
                             child: CupertinoPicker(
                               scrollController: FixedExtentScrollController(
-                                  initialItem: (selectedDay - 1)
-                                      .clamp(0, daysInMonth - 1)),
+                                initialItem: (selectedDay - 1)
+                                    .clamp(0, daysInMonth - 1),
+                              ),
                               itemExtent: 40,
                               onSelectedItemChanged: (index) {
                                 setModalState(() {
@@ -198,8 +204,9 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                                     (i) => Center(
                                   child: Text(
                                     '${i + 1}일',
-                                    style:
-                                    const TextStyle(color: AppColors.text),
+                                    style: const TextStyle(
+                                      color: AppColors.text,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -213,18 +220,24 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                       child: ElevatedButton(
                         onPressed: () {
                           setState(() {
-                            _birthDate =
-                                DateTime(selectedYear, selectedMonth, selectedDay);
+                            _birthDate = DateTime(
+                              selectedYear,
+                              selectedMonth,
+                              selectedDay,
+                            );
                           });
                           Navigator.pop(context);
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.primary,
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
-                        child: const Text('확인',
-                            style: TextStyle(color: Colors.white)),
+                        child: const Text(
+                          '확인',
+                          style: TextStyle(color: Colors.white),
+                        ),
                       ),
                     ),
                   ],
@@ -243,85 +256,113 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.card,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          height: 380,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '아바타 선택',
-                style: TextStyle(
-                  fontFamily: 'Pretendard',
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.text,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: GridView.builder(
-                  shrinkWrap: true,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
-                  ),
-                  // 첫 칸은 "없음(null)" 옵션
-                  itemCount: 1 + _avatarAssets.length,
-                  itemBuilder: (context, index) {
-                    final String? path =
-                    (index == 0) ? null : _avatarAssets[index - 1];
-                    final isSelected = path == _selectedAvatar;
+        final media = MediaQuery.of(ctx);
+        final sheetHeight = math.min(media.size.height * 0.65, 480.0);
 
-                    return GestureDetector(
-                      onTap: () {
-                        setState(() => _selectedAvatar = path);
-                        Navigator.pop(ctx);
-                      },
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color:
-                                isSelected ? AppColors.primary : AppColors.border,
-                                width: isSelected ? 3 : 1,
-                              ),
-                            ),
-                            child: CircleAvatar(
-                              radius: 40,
-                              backgroundColor: const Color(0xFF1F2937),
-                              backgroundImage:
-                              path != null ? AssetImage(path) : null,
-                              child: path == null
-                                  ? const Icon(Icons.person_off,
-                                  size: 30, color: Colors.grey)
-                                  : null,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          const SizedBox(
-                            height: 16,
-                            child: Text(
-                              '',
-                              style: TextStyle(
-                                  color: AppColors.textSub, fontSize: 13),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
+        return SizedBox(
+          height: sheetHeight,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  '아바타 선택',
+                  style: TextStyle(
+                    fontFamily: 'Pretendard',
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.text,
+                  ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                // 👉 반응형 그리드
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final double maxW = constraints.maxWidth;
+
+                      // 가용폭에 따른 칸 수
+                      int crossAxisCount;
+                      if (maxW < 360) {
+                        crossAxisCount = 3;
+                      } else if (maxW < 520) {
+                        crossAxisCount = 4;
+                      } else if (maxW < 720) {
+                        crossAxisCount = 5;
+                      } else {
+                        crossAxisCount = 6;
+                      }
+
+                      const double spacing = 16;
+                      final double tileWidth = (maxW - spacing * (crossAxisCount - 1)) / crossAxisCount;
+
+                      // 타일 안의 실제 원(외곽선 포함) 크기
+                      final double avatarOuter = math.min(tileWidth, 100);
+                      const double borderSelected = 3;
+                      const double borderNormal = 1;
+
+                      // mainAxisExtent = 원 높이 + 간격 (텍스트 제거)
+                      final double tileExtent = avatarOuter + 8;
+
+                      return GridView.builder(
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: crossAxisCount,
+                          crossAxisSpacing: spacing,
+                          mainAxisSpacing: spacing,
+                          mainAxisExtent: tileExtent,
+                        ),
+                        itemCount: 1 + _avatarAssets.length, // +1: 없음(null)
+                        itemBuilder: (context, index) {
+                          final String? path = (index == 0) ? null : _avatarAssets[index - 1];
+                          final bool isSelected = path == _selectedAvatar;
+                          final double borderWidth = isSelected ? borderSelected : borderNormal;
+
+                          // CircleAvatar의 실제 반지름 = (외곽원 지름/2) - 테두리
+                          final double radius = avatarOuter / 2 - borderWidth;
+
+                          return GestureDetector(
+                            onTap: () {
+                              setState(() => _selectedAvatar = path);
+                              Navigator.pop(ctx);
+                            },
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Container(
+                                  width: avatarOuter,
+                                  height: avatarOuter,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: isSelected ? AppColors.primary : AppColors.border,
+                                      width: borderWidth,
+                                    ),
+                                  ),
+                                  child: CircleAvatar(
+                                    radius: radius,
+                                    backgroundColor: const Color(0xFF1F2937),
+                                    backgroundImage: path != null ? AssetImage(path) : null,
+                                    child: path == null
+                                        ? const Icon(Icons.person_off, size: 30, color: Colors.grey)
+                                        : null,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -391,12 +432,9 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                     CircleAvatar(
                       radius: 50,
                       backgroundColor: const Color(0xFF1F2937),
-                      backgroundImage: _selectedAvatar != null
-                          ? AssetImage(_selectedAvatar!)
-                          : null,
+                      backgroundImage: _selectedAvatar != null ? AssetImage(_selectedAvatar!) : null,
                       child: _selectedAvatar == null
-                          ? const Icon(Icons.person,
-                          size: 50, color: Colors.white30)
+                          ? const Icon(Icons.person, size: 50, color: Colors.white30)
                           : null,
                     ),
                     if (!_avatarsLoaded)
@@ -435,12 +473,10 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('생년월일',
-                      style: TextStyle(color: AppColors.textSub, fontSize: 12)),
+                  const Text('생년월일', style: TextStyle(color: AppColors.textSub, fontSize: 12)),
                   const SizedBox(height: 6),
                   Container(
-                    padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
                     decoration: BoxDecoration(
                       color: AppColors.card,
                       borderRadius: BorderRadius.circular(12),
@@ -448,16 +484,14 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.calendar_today,
-                            color: AppColors.textSub),
+                        const Icon(Icons.calendar_today, color: AppColors.textSub),
                         const SizedBox(width: 12),
                         Text(
                           _birthDate == null
                               ? '생년월일 선택'
                               : DateFormat('yyyy-MM-dd').format(_birthDate!),
                           style: TextStyle(
-                            color:
-                            _birthDate == null ? AppColors.textHint : AppColors.text,
+                            color: _birthDate == null ? AppColors.textHint : AppColors.text,
                             fontSize: 16,
                           ),
                         ),
@@ -475,12 +509,9 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                     label: '좌안 시력',
                     hint: '예: 1.0',
                     icon: Icons.visibility,
-                    keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     onChanged: (v) => setState(() => _visionLeft = v),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                    ],
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -489,12 +520,9 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                     label: '우안 시력',
                     hint: '예: 1.0',
                     icon: Icons.visibility,
-                    keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     onChanged: (v) => setState(() => _visionRight = v),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                    ],
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                   ),
                 ),
               ],
@@ -518,11 +546,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
             ),
             child: const Text(
               '저장',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
             ),
           ),
         ),

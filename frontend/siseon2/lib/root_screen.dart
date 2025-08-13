@@ -35,6 +35,9 @@ class _RootScreenState extends State<RootScreen> {
   BluetoothCharacteristic? _writableChar;
   String? _deviceSerial; // DeviceCacheService/레거시/BLE에서 폴백
 
+  // ✅ 디바이스 상태 감시 (끊기면 즉시 정리)
+  StreamSubscription<BluetoothConnectionState>? _devStateSub;
+
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color rootBackground = Color(0xFF161B22);
   static const Color inactiveGrey = Colors.grey;
@@ -46,6 +49,12 @@ class _RootScreenState extends State<RootScreen> {
     mqttService.connect();         // ✅ MQTT 선연결 시도
     _loadProfileAndDevice();       // 프로필/디바이스 동기화
     if (_bleDebug) _attachBleDebugListeners();
+  }
+
+  @override
+  void dispose() {
+    _devStateSub?.cancel();
+    super.dispose();
   }
 
   void _attachBleDebugListeners() {
@@ -151,6 +160,16 @@ class _RootScreenState extends State<RootScreen> {
     }
   }
 
+  // ✅ 실제 연결 상태 한 번 더 확인 (진입 차단용)
+  Future<bool> _isCharConnected(BluetoothCharacteristic ch) async {
+    try {
+      final s = await ch.device.state.first;
+      return s == BluetoothConnectionState.connected;
+    } catch (_) {
+      return false;
+    }
+  }
+
   void _goToSettingsPage() {
     setState(() => _currentIndex = 2);
   }
@@ -237,7 +256,7 @@ class _RootScreenState extends State<RootScreen> {
     }
   }
 
-  // ── 수동 탭 핸들러 (MQTT → 로딩 → ManualPage) ────────────────
+  // ── 수동 탭 핸들러 (실연결 검증 + MQTT → 로딩 → ManualPage) ────────────────
   Future<void> _handleManualTap() async {
     if (_profileId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -247,10 +266,19 @@ class _RootScreenState extends State<RootScreen> {
     }
 
     final ch = _writableChar;
-    if (ch == null) {
+
+    // 1) characteristic 존재 & 실제 연결 여부 이중 검증
+    if (ch == null || !(await _isCharConnected(ch))) {
+      // 끊겼으면 흔적 정리
+      _devStateSub?.cancel();
+      _devStateSub = null;
+      setState(() => _writableChar = null);
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⚠️ 먼저 홈에서 BLE 기기를 연결해주세요.')),
+        const SnackBar(content: Text('⚠️ BLE가 연결되지 않았습니다. 홈에서 먼저 연결해주세요.')),
       );
+      // 필요 시 홈 탭으로 이동하려면 아래 주석 해제
+      // await _selectTab(0);
       return;
     }
 
@@ -265,13 +293,13 @@ class _RootScreenState extends State<RootScreen> {
       return;
     }
 
-    // 1) 수동 모드로 MQTT 발행 (previous_mode는 _currentMode 기준)
+    // 2) 수동 모드로 MQTT 발행
     await _publishControlMode(ControlMode.manual, deviceSerial: serial);
 
-    // 2) 3초 로딩
+    // 3) 3초 로딩
     await _showLoadingOverlay('잠깐만요, 자료 뒤적이는 중 📚', const Duration(seconds: 3));
 
-    // 3) 가로 고정 → ManualPage 진입
+    // 4) 가로 고정 → ManualPage 진입
     await SystemChrome.setPreferredOrientations(
       [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight],
     );
@@ -292,7 +320,7 @@ class _RootScreenState extends State<RootScreen> {
     // 세로 고정 복구
     await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
 
-    // ✅ 결과값을 전역 상태와 홈 카드에 반영 (중요!)
+    // ✅ 결과값을 전역 상태와 홈 카드에 반영
     if (result != null && mounted) {
       setState(() => _currentMode = result);
     }
@@ -313,7 +341,24 @@ class _RootScreenState extends State<RootScreen> {
         // ✅ BLE 연결되면 여기로 characteristic 넘어옴
         onConnect: (c) async {
           setState(() => _writableChar = c);
-          // BLE 연결 직후 시리얼 미확보 상태면 폴백으로라도 세팅
+
+          // 🔎 디바이스 상태 감시: 끊기면 즉시 정리
+          _devStateSub?.cancel();
+          _devStateSub = c.device.state.listen((st) {
+            if (_bleDebug) debugPrint('🔌 [DeviceState] $st');
+            if (st == BluetoothConnectionState.disconnected) {
+              _devStateSub?.cancel();
+              _devStateSub = null;
+              if (mounted) {
+                setState(() => _writableChar = null);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('🔌 BLE 연결이 끊어졌습니다. 홈에서 다시 연결해주세요.')),
+                );
+              }
+            }
+          });
+
+          // 시리얼 폴백 처리 그대로 유지
           if (_deviceSerial == null || _deviceSerial!.isEmpty) {
             final fromBle = _deviceIdFromChar(c);
             if (fromBle.isNotEmpty) {
