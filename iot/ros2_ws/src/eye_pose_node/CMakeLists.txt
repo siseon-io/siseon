@@ -9,7 +9,6 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
-find_package(geometry_msgs REQUIRED)
 
 # JSON (header-only)
 find_package(nlohmann_json REQUIRED)
@@ -30,7 +29,6 @@ add_executable(eye_pose_node src/eye_pose_node.cpp)
 ament_target_dependencies(eye_pose_node
   rclcpp
   std_msgs
-  geometry_msgs
 )
 
 # Include directories for Asio and websocketpp
@@ -43,6 +41,7 @@ target_include_directories(eye_pose_node PRIVATE
 target_link_libraries(eye_pose_node
   PkgConfig::ASIO
   nlohmann_json::nlohmann_json
+  CURL::libcurl
 )
 
 install(TARGETS eye_pose_node

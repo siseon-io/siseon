@@ -10,7 +10,7 @@
 #include <cmath>
 
 // --- 다이나믹셀 설정 ---
-#define PORT_NAME           "/dev/ttyUSB1"
+#define PORT_NAME           "/dev/ttyUSB0"
 #define BAUDRATE            1000000
 #define PROTOCOL_VERSION    2.0
 
@@ -26,7 +26,7 @@
 
 // 이동 속도 값 (단위: 0.229 rpm)
 // 0 = 최대속도, 50 = 약 11.45rpm
-#define DXL_MOVING_SPEED_VALUE      50
+#define DXL_MOVING_SPEED_VALUE      25 // 값을 50에서 25로 낮춰 속도를 줄입니다.
 
 
 class ArmControlNode : public rclcpp::Node
@@ -106,11 +106,17 @@ private:
     // '/cmd_pose' 토픽 수신 시 호출되는 콜백 함수
     void cmd_pose_callback(const arm_control_node::msg::CmdPose::SharedPtr msg)
     {
-        RCLCPP_INFO(this->get_logger(), "Received /cmd_pose command");
+        // --- Latency Calculation ---
+        auto now = this->now();
+        auto source_time = rclcpp::Time(msg->header.stamp);
+        auto latency = now - source_time;
+        RCLCPP_INFO(this->get_logger(), "Total Latency: %.2f ms", latency.seconds() * 1000.0);
+        
+        // RCLCPP_INFO(this->get_logger(), "Received /cmd_pose command");
         
         std::map<std::string, double> commands = {
             {"joint1", msg->m11}, {"joint2", msg->m12},
-            {"joint3", msg->m13}, {"joint4", msg->m14}
+            {"joint3", msg->m13} //, {"joint4", msg->m14} // ID 14번 모터는 움직이지 않도록 주석 처리
         };
 
         for (const auto& cmd : commands) {
@@ -126,7 +132,7 @@ private:
             } else if (dxl_error != 0) {
                 RCLCPP_ERROR(this->get_logger(), "ID %d 에러 발생: %s", dxl_id, packetHandler_->getRxPacketError(dxl_error));
             } else {
-                RCLCPP_INFO(this->get_logger(), "ID %d → %d (%.2f rad)", dxl_id, dxl_goal_position, cmd.second);
+                // RCLCPP_INFO(this->get_logger(), "ID %d → %d (%.2f rad)", dxl_id, dxl_goal_position, cmd.second);
             }
         }
     }
@@ -185,7 +191,7 @@ private:
             RCLCPP_INFO(this->get_logger(), "ID %d 토크 ON 성공", pair.second);
 
             // 2. 이동 속도 설정
-            dxl_comm_result = packetHandler_->write4ByteTxRx(
+            dxl_comm_result = packetHandler_->write4ByteTxRx( 
                 portHandler_, pair.second, ADDR_MOVING_SPEED, DXL_MOVING_SPEED_VALUE, &dxl_error);
             if (dxl_comm_result != COMM_SUCCESS) {
                 RCLCPP_ERROR(this->get_logger(), "ID %d 속도 설정 통신 실패: %s", pair.second, packetHandler_->getTxRxResult(dxl_comm_result));

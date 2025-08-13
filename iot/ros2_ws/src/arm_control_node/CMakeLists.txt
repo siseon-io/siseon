@@ -17,6 +17,7 @@ find_package(dynamixel_sdk REQUIRED)
 # This creates message-related targets.
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CmdPose.msg"
+  DEPENDENCIES std_msgs
 )
 
 # We must use a different name for our executable to avoid conflict.

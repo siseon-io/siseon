@@ -155,11 +155,11 @@ public:
             // registerAgent(); // 필요 시 주석 해제
             registerGattApplication();
         } catch (const sdbus::Error& e) {
-            // RCLCPP_ERROR(this->get_logger(), "D-Bus 연결 실패: %s", e.what());
+            RCLCPP_ERROR(this->get_logger(), "D-Bus 연결 실패: %s", e.what());
             return;
         }
         
-        // RCLCPP_INFO(this->get_logger(), "✅ Manual BT Node (GATT 서버) 시작됨. /mac_addr 토픽을 기다립니다...");
+        RCLCPP_INFO(this->get_logger(), "✅ Manual BT Node (GATT 서버) 시작됨. /mac_addr 토픽을 기다립니다...");
     }
 
     ~ManualBTNode()
@@ -272,9 +272,9 @@ void GattCharacteristic::WriteValue(
     for (auto b : value) {
         oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b) << ' ';
     }
-    // RCLCPP_INFO(rclcpp::get_logger("gatt_server"),
-    //             "WriteValue 호출, 수신 데이터: [%s]",
-    //             oss.str().c_str());
+    RCLCPP_INFO(rclcpp::get_logger("gatt_server"),
+                "WriteValue 호출, 수신 데이터: [%s]",
+                oss.str().c_str());
 
     // 내부 값 갱신
     characteristic_value_ = value;
