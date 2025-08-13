@@ -32,12 +32,12 @@ class _BleScanScreenState extends State<BleScanScreen> {
   final Map<String, BluetoothDevice> _foundDevices = {};
   final Map<String, List<Guid>> _serviceUuids = {};
 
-  String? _selectedMac;
   final List<String> _logs = [];
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _writableChar;
 
   bool _isScanning = false;
+  bool _busy = false; // ✅ 연결 중 오버레이 표시용
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<bool>? _isScanningSub;
   StreamSubscription<BluetoothConnectionState>? _connStateSub;
@@ -139,201 +139,206 @@ class _BleScanScreenState extends State<BleScanScreen> {
   }
 
   Future<void> _onSelectDevice(String mac) async {
-    setState(() {
-      _selectedMac = mac;
-      _logs.clear();
-    });
+    if (_busy) return;
+    _setBusy(true);
+    _logs.clear();
 
-    await _stopScan();
-    final device = _foundDevices[mac];
-    if (device == null) return;
-
-    _connectedDevice = device;
-    _addLog('🔌 Target device: $mac');
-
-    // 🔎 광고에 실린 서비스 UUID들 출력 + 커스텀 서비스 힌트 추출
-    final advUuids = _serviceUuids[mac] ?? const [];
-    String? advSvcHint;
-    if (advUuids.isEmpty) {
-      _addLog('📣 ADV.serviceUuids = [] (광고에 UUID 미포함/OS 캐시 이슈 가능)');
-    } else {
-      final advList = advUuids.map((g) => g.toString().toLowerCase()).toList();
-      _addLog('📣 ADV.serviceUuids = [${advList.join(', ')}]');
-      advSvcHint = _pickCustomAdvSvc(advUuids);
-      if (advSvcHint != null) {
-        _addLog('🔎 advSvcHint = $advSvcHint');
-      }
-    }
-
-    // 🔎 외부에서 타겟 캐릭터 UUID가 들어왔다면 표시 (우선권 가짐)
-    final wantChar = widget.targetCharUuid?.toLowerCase().trim();
-    if (wantChar != null && wantChar.isNotEmpty) {
-      _addLog('🎯 targetCharUuid (external) = $wantChar');
-    }
-
-    // 연결 상태 실시간 로그
-    _connStateSub?.cancel();
-    _connStateSub = device.state.listen((s) {
-      _addLog('🔄 Device state: $s');
-    });
-
-    // 1) 연결
-    final current = await device.state.first;
-    if (current != BluetoothConnectionState.connected) {
-      _addLog('🔗 Connecting...');
-      try {
-        await device.connect(
-          autoConnect: false,
-          timeout: const Duration(seconds: 10),
-        );
-        _addLog('✅ Connected');
-      } on PlatformException catch (e) {
-        _addLog('❌ Connection failed (PlatformException): ${_formatPlatformException(e)}');
-        await _safeDisconnect(device);
-        await _clearGattCache(); // 일부 GATT 133 등 복구용
-        return;
-      } catch (e) {
-        _addLog('❌ Connection failed: ${_formatBleError(e)}');
-        await _safeDisconnect(device);
+    try {
+      await _stopScan();
+      final device = _foundDevices[mac];
+      if (device == null) {
         return;
       }
-    } else {
-      _addLog('ℹ️ Already connected');
-    }
 
-    // 2) 연결 직후 안정화
-    try {
-      await device.requestConnectionPriority(
-        connectionPriorityRequest: ConnectionPriority.high,
-      );
-    } catch (_) {}
-    await Future.delayed(const Duration(milliseconds: 300));
-    try {
-      await device.requestMtu(247);
-    } catch (_) {}
-    await Future.delayed(const Duration(milliseconds: 150));
+      _connectedDevice = device;
+      _addLog('🔌 Target device: $mac');
 
-    // 3) 서비스 탐색(1회)
-    List<BluetoothService> services = const [];
-    try {
-      services = await device.discoverServices();
-      _addLog('🧪 Discovered services: ${services.length}');
-
-      // 🔎 각 서비스/캐릭터 전부 덤프
-      for (final s in services) {
-        _addLog('🧩 Service: ${s.uuid.toString().toLowerCase()} '
-            '(${s.characteristics.length} chars)');
-        for (final c in s.characteristics) {
-          final p = c.properties;
-          _addLog('   └─ Char: ${c.uuid.toString().toLowerCase()} '
-              '[read=${p.read}, write=${p.write}, writeNR=${p.writeWithoutResponse}, '
-              'notify=${p.notify}, indicate=${p.indicate}]');
+      // 🔎 광고에 실린 서비스 UUID들 확인 + 커스텀 서비스 힌트 추출
+      final advUuids = _serviceUuids[mac] ?? const [];
+      String? advSvcHint;
+      if (advUuids.isEmpty) {
+        _addLog('📣 ADV.serviceUuids = [] (광고에 UUID 미포함/OS 캐시 이슈 가능)');
+      } else {
+        final advList = advUuids.map((g) => g.toString().toLowerCase()).toList();
+        _addLog('📣 ADV.serviceUuids = [${advList.join(', ')}]');
+        advSvcHint = _pickCustomAdvSvc(advUuids);
+        if (advSvcHint != null) {
+          _addLog('🔎 advSvcHint = $advSvcHint');
         }
       }
-    } on PlatformException catch (e) {
-      _addLog('❌ discoverServices failed (PlatformException): ${_formatPlatformException(e)}');
-      await _safeDisconnect(device);
-      return;
-    } catch (e) {
-      _addLog('❌ discoverServices failed: ${_formatBleError(e)}');
-      await _safeDisconnect(device);
-      return;
-    }
 
-    // 4) 서비스/캐릭터 선택 로직
-    try {
-      // 4-1) 선호 서비스 집합 만들기: 광고 힌트 > 비표준(커스텀) 서비스
-      List<BluetoothService> preferredServices = [];
-
-      if (advSvcHint != null) {
-        final match = services.where((s) =>
-        s.uuid.toString().toLowerCase() == advSvcHint);
-        preferredServices.addAll(match);
+      // 🔎 외부에서 타겟 캐릭터 UUID가 들어왔다면 표시 (우선권 가짐)
+      final wantChar = widget.targetCharUuid?.toLowerCase().trim();
+      if (wantChar != null && wantChar.isNotEmpty) {
+        _addLog('🎯 targetCharUuid (external) = $wantChar');
       }
 
-      if (preferredServices.isEmpty) {
-        preferredServices = services.where((s) {
-          final su = s.uuid.toString().toLowerCase();
-          return !_ignoreSvc.contains(su) && !_looksLike16BitBase(su);
-        }).toList();
+      // 연결 상태 실시간 로그
+      _connStateSub?.cancel();
+      _connStateSub = device.state.listen((s) {
+        _addLog('🔄 Device state: $s');
+      });
+
+      // 1) 연결
+      final current = await device.state.first;
+      if (current != BluetoothConnectionState.connected) {
+        _addLog('🔗 Connecting...');
+        try {
+          await device.connect(
+            autoConnect: false,
+            timeout: const Duration(seconds: 10),
+          );
+          _addLog('✅ Connected');
+        } on PlatformException catch (e) {
+          _addLog('❌ Connection failed (PlatformException): ${_formatPlatformException(e)}');
+          await _safeDisconnect(device);
+          await _clearGattCache(); // 일부 GATT 133 등 복구용
+          return;
+        } catch (e) {
+          _addLog('❌ Connection failed: ${_formatBleError(e)}');
+          await _safeDisconnect(device);
+          return;
+        }
+      } else {
+        _addLog('ℹ️ Already connected');
       }
 
-      // 폴백: 그래도 없으면 전체 사용
-      final searchSpace = preferredServices.isNotEmpty
-          ? preferredServices
-          : services;
+      // 2) 연결 직후 안정화
+      try {
+        await device.requestConnectionPriority(
+          connectionPriorityRequest: ConnectionPriority.high,
+        );
+      } catch (_) {}
+      await Future.delayed(const Duration(milliseconds: 300));
+      try {
+        await device.requestMtu(247);
+      } catch (_) {}
+      await Future.delayed(const Duration(milliseconds: 150));
 
-      // 4-2) 캐릭터 선택
-      BluetoothCharacteristic? bestReadableWritable;
-      BluetoothCharacteristic? bestWritable;
+      // 3) 서비스 탐색(1회)
+      List<BluetoothService> services = const [];
+      try {
+        services = await device.discoverServices();
+        _addLog('🧪 Discovered services: ${services.length}');
 
-      for (final s in searchSpace) {
-        final svcLower = s.uuid.toString().toLowerCase();
-        if (_ignoreSvc.contains(svcLower)) continue;
-
-        for (final c in s.characteristics) {
-          final uuidLower = c.uuid.toString().toLowerCase();
-          final canWrite = c.properties.write || c.properties.writeWithoutResponse;
-          final canRead  = c.properties.read;
-
-          // 외부에서 특정 char 요구하면 그것부터
-          if (wantChar != null && wantChar.isNotEmpty) {
-            if (uuidLower == wantChar && canWrite) {
-              _writableChar = c;
-              break;
-            }
-          } else {
-            if (canWrite && canRead && bestReadableWritable == null) {
-              bestReadableWritable = c;
-            }
-            if (canWrite && bestWritable == null) {
-              bestWritable = c;
-            }
+        // 🔎 각 서비스/캐릭터 전부 덤프
+        for (final s in services) {
+          _addLog('🧩 Service: ${s.uuid.toString().toLowerCase()} '
+              '(${s.characteristics.length} chars)');
+          for (final c in s.characteristics) {
+            final p = c.properties;
+            _addLog('   └─ Char: ${c.uuid.toString().toLowerCase()} '
+                '[read=${p.read}, write=${p.write}, writeNR=${p.writeWithoutResponse}, '
+                'notify=${p.notify}, indicate=${p.indicate}]');
           }
         }
-        if (_writableChar != null) break;
+      } on PlatformException catch (e) {
+        _addLog('❌ discoverServices failed (PlatformException): ${_formatPlatformException(e)}');
+        await _safeDisconnect(device);
+        return;
+      } catch (e) {
+        _addLog('❌ discoverServices failed: ${_formatBleError(e)}');
+        await _safeDisconnect(device);
+        return;
       }
 
-      _writableChar ??= bestReadableWritable ?? bestWritable;
+      // 4) 서비스/캐릭터 선택 로직
+      try {
+        // 4-1) 선호 서비스 집합 만들기: 광고 힌트 > 비표준(커스텀) 서비스
+        List<BluetoothService> preferredServices = [];
 
-      if (_writableChar == null) {
-        _addLog('⚠️ 쓸 수 있는 특성을 찾지 못했습니다. (write/read 속성 확인 필요)');
-      } else {
-        // ✅ 선택 결과 자세히 출력 (service + char UUID)
-        final c = _writableChar!;
-        final p = c.properties;
-        final svcUuid  = c.serviceUuid.toString().toLowerCase();
-        final charUuid = c.uuid.toString().toLowerCase();
+        if (advSvcHint != null) {
+          final match = services.where((s) =>
+          s.uuid.toString().toLowerCase() == advSvcHint);
+          preferredServices.addAll(match);
+        }
 
-        _addLog('✅ Selected service: $svcUuid');
-        _addLog('✅ Selected characteristic: $charUuid');
-        _addLog('🧷 Char props → read=${p.read}, write=${p.write}, '
-            'writeNR=${p.writeWithoutResponse}, notify=${p.notify}, indicate=${p.indicate}');
+        if (preferredServices.isEmpty) {
+          preferredServices = services.where((s) {
+            final su = s.uuid.toString().toLowerCase();
+            return !_ignoreSvc.contains(su) && !_looksLike16BitBase(su);
+          }).toList();
+        }
 
-        // 🔒 링크 검증 (read 또는 notify on/off)
-        final verified = await _verifyLink(_connectedDevice!, _writableChar!);
-        _addLog(verified ? '🔒 Link verify: OK' : '⚠️ Link verify: skipped or best-effort');
+        // 폴백: 그래도 없으면 전체 사용
+        final searchSpace = preferredServices.isNotEmpty
+            ? preferredServices
+            : services;
 
-        // (옵션) 전역 세션에 저장 — 전역 사용 원치 않으면 이 3줄 주석 처리
-        try {
-          await bleSession.setConnected(_connectedDevice!, _writableChar!);
-          _addLog('🌐 Global session set');
-        } catch (_) {}
+        // 4-2) 캐릭터 선택
+        BluetoothCharacteristic? bestReadableWritable;
+        BluetoothCharacteristic? bestWritable;
 
-        if (!mounted) return;
+        for (final s in searchSpace) {
+          final svcLower = s.uuid.toString().toLowerCase();
+          if (_ignoreSvc.contains(svcLower)) continue;
 
-        // ✅ 결과 정상 전달 → 이 화면에서는 disconnect 하지 않음
-        _handoff = true;
+          for (final c in s.characteristics) {
+            final uuidLower = c.uuid.toString().toLowerCase();
+            final canWrite = c.properties.write || c.properties.writeWithoutResponse;
+            final canRead  = c.properties.read;
 
-        Navigator.pop(context, {
-          'device': _connectedDevice,
-          'writableChar': _writableChar,
-          'serviceUuid': c.serviceUuid.toString(),
-          'charUuid': c.uuid.toString(),
-        });
+            // 외부에서 특정 char 요구하면 그것부터
+            if (wantChar != null && wantChar.isNotEmpty) {
+              if (uuidLower == wantChar && canWrite) {
+                _writableChar = c;
+                break;
+              }
+            } else {
+              if (canWrite && canRead && bestReadableWritable == null) {
+                bestReadableWritable = c;
+              }
+              if (canWrite && bestWritable == null) {
+                bestWritable = c;
+              }
+            }
+          }
+          if (_writableChar != null) break;
+        }
+
+        _writableChar ??= bestReadableWritable ?? bestWritable;
+
+        if (_writableChar == null) {
+          _addLog('⚠️ 쓸 수 있는 특성을 찾지 못했습니다. (write/read 속성 확인 필요)');
+        } else {
+          // ✅ 선택 결과 자세히 출력 (service + char UUID)
+          final c = _writableChar!;
+          final p = c.properties;
+          final svcUuid  = c.serviceUuid.toString().toLowerCase();
+          final charUuid = c.uuid.toString().toLowerCase();
+
+          _addLog('✅ Selected service: $svcUuid');
+          _addLog('✅ Selected characteristic: $charUuid');
+          _addLog('🧷 Char props → read=${p.read}, write=${p.write}, '
+              'writeNR=${p.writeWithoutResponse}, notify=${p.notify}, indicate=${p.indicate}');
+
+          // 🔒 링크 검증 (read 또는 notify on/off)
+          final verified = await _verifyLink(_connectedDevice!, _writableChar!);
+          _addLog(verified ? '🔒 Link verify: OK' : '⚠️ Link verify: skipped or best-effort');
+
+          // (옵션) 전역 세션에 저장 — 전역 사용 원치 않으면 이 3줄 주석 처리
+          try {
+            await bleSession.setConnected(_connectedDevice!, _writableChar!);
+            _addLog('🌐 Global session set');
+          } catch (_) {}
+
+          if (!mounted) return;
+
+          // ✅ 결과 정상 전달 → 이 화면에서는 disconnect 하지 않음
+          _handoff = true;
+
+          Navigator.pop(context, {
+            'device': _connectedDevice,
+            'writableChar': _writableChar,
+            'serviceUuid': c.serviceUuid.toString(),
+            'charUuid': c.uuid.toString(),
+          });
+        }
+      } catch (e) {
+        _addLog('❌ Characteristic search failed: ${_formatBleError(e)}');
       }
-    } catch (e) {
-      _addLog('❌ Characteristic search failed: ${_formatBleError(e)}');
+    } finally {
+      _setBusy(false);
     }
   }
 
@@ -426,10 +431,16 @@ class _BleScanScreenState extends State<BleScanScreen> {
 
   void _addLog(String msg) {
     debugPrint(msg); // 콘솔(Logcat)에도 같이 출력
-    setState(() {
-      _logs.insert(0, msg);
-      if (_logs.length > 200) _logs.removeLast();
-    });
+    // 화면에는 로그 안 띄우지만, 필요하면 여기에 SnackBar 등 붙일 수 있음
+    _logs.insert(0, msg);
+    if (_logs.length > 200) {
+      _logs.removeLast();
+    }
+  }
+
+  void _setBusy(bool v) {
+    if (!mounted) return;
+    setState(() => _busy = v);
   }
 
   @override
@@ -449,8 +460,6 @@ class _BleScanScreenState extends State<BleScanScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final onLogView = _selectedMac != null;
-
     return Scaffold(
       backgroundColor: AppColors.backgroundBlack,
       appBar: AppBar(
@@ -459,40 +468,57 @@ class _BleScanScreenState extends State<BleScanScreen> {
         centerTitle: true,
         foregroundColor: Colors.white,
         iconTheme: const IconThemeData(color: Colors.white, size: 22),
-        leading: onLogView
-            ? IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 22),
-          onPressed: () => setState(() => _selectedMac = null),
-          splashRadius: 22,
-        )
-            : null,
-        title: Text(
-          onLogView ? 'BLE Logs' : 'BLE Scan & Connect',
-          style: const TextStyle(
+        title: const Text(
+          'BLE Scan & Connect',
+          style: TextStyle(
             color: AppColors.text,
             fontFamily: 'Pretendard',
             fontWeight: FontWeight.w700,
           ),
         ),
         actions: [
-          if (!onLogView)
-            IconButton(
-              tooltip: _isScanning ? 'Stop scan' : 'Start scan',
-              icon: Icon(
-                _isScanning ? Icons.stop_circle_outlined : Icons.refresh,
-                color: Colors.white70,
+          IconButton(
+            tooltip: _isScanning ? 'Stop scan' : 'Start scan',
+            icon: Icon(
+              _isScanning ? Icons.stop_circle_outlined : Icons.refresh,
+              color: Colors.white70,
+            ),
+            onPressed: () => _isScanning ? _stopScan() : _startScan(),
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: _deviceListView(),
+          ),
+          if (_busy)
+            Positioned.fill(
+              child: Container(
+                color: Colors.black54,
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: const [
+                      SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: CircularProgressIndicator(strokeWidth: 3),
+                      ),
+                      SizedBox(height: 12),
+                      Text(
+                        '기기와 연결 중…',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              onPressed: () => _isScanning ? _stopScan() : _startScan(),
             ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: onLogView ? _logView() : _deviceListView(),
-      ),
-      bottomNavigationBar: onLogView
-          ? null
-          : SafeArea(
+      bottomNavigationBar: SafeArea(
         top: false,
         minimum: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         child: SizedBox(
@@ -634,70 +660,6 @@ class _BleScanScreenState extends State<BleScanScreen> {
               },
             ),
           ),
-      ],
-    );
-  }
-
-  Widget _logView() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: AppColors.cardGrey,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.cardBorder.withOpacity(0.5), width: 1),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.device_hub, color: AppColors.primaryBlue),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Target: ${_selectedMac ?? '-'}',
-                  style: const TextStyle(color: AppColors.text, fontFamily: 'Pretendard'),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 12),
-        Expanded(
-          child: Container(
-            decoration: BoxDecoration(
-              color: AppColors.cardGrey,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.white.withOpacity(0.10), width: 1),
-            ),
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-            child: _logs.isEmpty
-                ? const Center(
-              child: Text(
-                '로그가 없습니다.',
-                style: TextStyle(color: AppColors.textSub, fontFamily: 'Pretendard'),
-              ),
-            )
-                : ListView.builder(
-              reverse: true,
-              itemCount: _logs.length,
-              itemBuilder: (context, idx) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Text(
-                    _logs[idx],
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontFamily: 'RobotoMono',
-                      fontSize: 13,
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ),
       ],
     );
   }

@@ -9,6 +9,7 @@ import 'pages/home_screen.dart';
 import 'pages/manual_page.dart';
 import 'pages/chatbot_page.dart';
 import 'pages/settings/settings_page.dart';
+import 'pages/device_register_page.dart'; // ✅ 기기 등록 페이지 이동용
 
 import 'package:siseon2/models/control_mode.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
@@ -174,6 +175,7 @@ class _RootScreenState extends State<RootScreen> {
     setState(() => _currentIndex = 2);
   }
 
+  // HomeScreen 토글이 AI로 바꿀 때 들어오는 콜백(로컬 UI용)
   void _handleAiModeFromHome() {
     _homeKey.currentState?.setModeExternal(ControlMode.auto); // 홈 카드 갱신
     ScaffoldMessenger.of(context).showSnackBar(
@@ -226,8 +228,84 @@ class _RootScreenState extends State<RootScreen> {
     if (mounted) Navigator.of(context, rootNavigator: true).pop();
   }
 
+  // ── 기기 등록 가드: 미등록이면 알림 → 등록 페이지 ─────────────
+  // ── 기기 등록 가드: 미등록이면 알림 → 등록 페이지 ─────────────
+  Future<bool> _requireDeviceRegistered() async {
+    if (_profileId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ 먼저 프로필을 선택/생성해주세요. (설정 탭)')),
+      );
+      return false;
+    }
+
+    // 캐시에서 등록 여부 확인
+    final dev = await DeviceCacheService.loadDeviceForProfile(_profileId!);
+    final isRegistered = dev != null;
+
+    if (isRegistered) {
+      // 시리얼 없으면 한 번 더 보강
+      if (_deviceSerial == null || _deviceSerial!.isEmpty) {
+        await _ensureDeviceSerialWithFallback();
+      }
+      return true;
+    }
+
+    // 알림 → 등록 페이지 이동
+    final go = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => AlertDialog(
+        backgroundColor: rootBackground,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text(
+          '기기 등록이 필요합니다',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        content: const Text(
+          '이 기능을 사용하려면 먼저 기기를 등록해주세요.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          // ✅ 순서 변경: 등록하기(왼쪽) → 취소(오른쪽)
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              '등록하기',
+              style: TextStyle(color: primaryBlue, fontWeight: FontWeight.w700),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
+    );
+
+    if (go == true) {
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const DeviceRegisterPage()),
+      );
+      if (result == true) {
+        await _ensureDeviceSerialWithFallback();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('✅ 기기 등록 완료')),
+        );
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+
   // ── MQTT 발행 ─────────────────────────────────────────────
   Future<bool> _publishControlMode(ControlMode nextMode, {required String deviceSerial}) async {
+    // 👉 발행 전 등록 가드
+    final ok = await _requireDeviceRegistered();
+    if (!ok) return false;
+
     if (_profileId == null) return false;
 
     final payload = {
@@ -256,7 +334,33 @@ class _RootScreenState extends State<RootScreen> {
     }
   }
 
-  // ── 수동 탭 핸들러 (실연결 검증 + MQTT → 로딩 → ManualPage) ────────────────
+  // ── AI 모드 탭( FAB ) : 등록 가드 + MQTT 발행 + 홈카드 동기화 ─────────────
+  Future<void> _handleAiModeTap() async {
+    // 등록 여부 확인
+    final ok = await _requireDeviceRegistered();
+    if (!ok) return;
+
+    // 시리얼 확보
+    String serial = (_deviceSerial != null && _deviceSerial!.isNotEmpty)
+        ? _deviceSerial!
+        : (_writableChar != null ? _deviceIdFromChar(_writableChar!) : '');
+
+    if (serial.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⚠️ 디바이스 ID(시리얼)를 확인할 수 없습니다. 등록/연결 후 다시 시도해주세요.')),
+      );
+      return;
+    }
+
+    // MQTT 발행
+    final ok2 = await _publishControlMode(ControlMode.auto, deviceSerial: serial);
+    if (!ok2) return;
+
+    // 홈 카드 동기화(로컬)
+    _homeKey.currentState?.setModeExternal(ControlMode.auto);
+  }
+
+  // ── 수동 탭 핸들러 (등록 가드 + 실연결 검증 + MQTT → 로딩 → ManualPage) ────────────────
   Future<void> _handleManualTap() async {
     if (_profileId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -264,6 +368,10 @@ class _RootScreenState extends State<RootScreen> {
       );
       return;
     }
+
+    // 0) 등록 가드
+    final ok = await _requireDeviceRegistered();
+    if (!ok) return;
 
     final ch = _writableChar;
 
@@ -331,7 +439,7 @@ class _RootScreenState extends State<RootScreen> {
     final pages = [
       HomeScreen(
         key: _homeKey,
-        onAiModeSwitch: _handleAiModeFromHome,
+        onAiModeSwitch: _handleAiModeFromHome, // 홈 토글 → 로컬 알림/동기화
         onGoToProfile: _goToSettingsPage,
         currentMode: _currentMode,
         onModeChange: (mode) {
@@ -380,7 +488,7 @@ class _RootScreenState extends State<RootScreen> {
       backgroundColor: rootBackground,
       body: pages[_currentIndex],
       floatingActionButton: FloatingActionButton(
-        onPressed: _handleAiModeFromHome,
+        onPressed: _handleAiModeTap, // ✅ AI 전환도 가드 + MQTT 발행
         backgroundColor: primaryBlue,
         child: const Icon(Icons.remove_red_eye, size: 30, color: Colors.white),
       ),
