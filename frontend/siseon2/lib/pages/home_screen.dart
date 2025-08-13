@@ -23,7 +23,7 @@ import 'package:siseon2/pages/device_register_page.dart';
 import 'package:siseon2/pages/settings/preset_page.dart';
 import 'package:siseon2/pages/settings/stats_page.dart';
 import 'package:siseon2/pages/settings/edit_profile.dart';
-import 'package:siseon2/pages/settings/settings_page.dart';
+
 import 'package:siseon2/widgets/rect_card.dart';
 
 enum PostureBannerStatus { good, bad, none }

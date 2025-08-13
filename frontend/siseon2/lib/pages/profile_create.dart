@@ -262,8 +262,8 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
       ),
       builder: (ctx) {
         final media = MediaQuery.of(ctx);
-        final sheetHeight = math.min(media.size.height * 0.65, 480.0);
-
+// 기존: 0.65, 480
+        final sheetHeight = math.min(media.size.height * 0.40, 400.0);
         return SizedBox(
           height: sheetHeight,
           child: Padding(
@@ -280,50 +280,42 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                     color: AppColors.text,
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 // 👉 반응형 그리드
+// 기존 Expanded(child: LayoutBuilder(...)) 블록을 ↓ 이걸로 교체
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
+                      const int crossAxisCount = 3;     // 항상 3칸
+                      const double spacing = 12;        // 동일 간격
                       final double maxW = constraints.maxWidth;
 
-                      // 가용폭에 따른 칸 수
-                      int crossAxisCount;
-                      if (maxW < 360) {
-                        crossAxisCount = 3;
-                      } else if (maxW < 520) {
-                        crossAxisCount = 4;
-                      } else if (maxW < 720) {
-                        crossAxisCount = 5;
-                      } else {
-                        crossAxisCount = 6;
-                      }
+                      final double tileWidth =
+                          (maxW - spacing * (crossAxisCount - 1)) / crossAxisCount;
 
-                      const double spacing = 16;
-                      final double tileWidth = (maxW - spacing * (crossAxisCount - 1)) / crossAxisCount;
-
-                      // 타일 안의 실제 원(외곽선 포함) 크기
-                      final double avatarOuter = math.min(tileWidth, 100);
+                      // 동일 지름 cap
+                      final double avatarOuter = math.min(tileWidth, 84);
                       const double borderSelected = 3;
                       const double borderNormal = 1;
 
-                      // mainAxisExtent = 원 높이 + 간격 (텍스트 제거)
-                      final double tileExtent = avatarOuter + 8;
+                      // 동일 셀 세로 높이
+                      final double tileExtent = avatarOuter + 4;
 
                       return GridView.builder(
+                        padding: EdgeInsets.zero,
+                        physics: const ClampingScrollPhysics(),
+                        primary: false,
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: crossAxisCount,
                           crossAxisSpacing: spacing,
                           mainAxisSpacing: spacing,
                           mainAxisExtent: tileExtent,
                         ),
-                        itemCount: 1 + _avatarAssets.length, // +1: 없음(null)
+                        itemCount: 1 + _avatarAssets.length,
                         itemBuilder: (context, index) {
                           final String? path = (index == 0) ? null : _avatarAssets[index - 1];
                           final bool isSelected = path == _selectedAvatar;
                           final double borderWidth = isSelected ? borderSelected : borderNormal;
-
-                          // CircleAvatar의 실제 반지름 = (외곽원 지름/2) - 테두리
                           final double radius = avatarOuter / 2 - borderWidth;
 
                           return GestureDetector(
@@ -349,7 +341,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                                     backgroundColor: const Color(0xFF1F2937),
                                     backgroundImage: path != null ? AssetImage(path) : null,
                                     child: path == null
-                                        ? const Icon(Icons.person_off, size: 30, color: Colors.grey)
+                                        ? const Icon(Icons.person_off, size: 24, color: Colors.grey)
                                         : null,
                                   ),
                                 ),
@@ -360,7 +352,8 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                       );
                     },
                   ),
-                ),
+                )
+
               ],
             ),
           ),
