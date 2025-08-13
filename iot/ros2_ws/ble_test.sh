@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "🔧 Building workspace..."
-colcon build
+# colcon build
 
 echo "🌍 Setting up environment..."
 source install/setup.bash

@@ -11,6 +11,8 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(arm_control_node REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 
 add_executable(fusion_node src/fusion_node.cpp)
 
@@ -20,6 +22,8 @@ ament_target_dependencies(fusion_node
   std_msgs
   geometry_msgs
   arm_control_node
+  sensor_msgs
+  tf2_ros
 )
 
 install(TARGETS fusion_node

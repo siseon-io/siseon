@@ -1,7 +1,6 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <nlohmann/json.hpp>
-#include <geometry_msgs/msg/point_stamped.hpp>
 #include <asio.hpp>
 #include <array>
 #include <thread>
@@ -21,7 +20,7 @@ public:
     const char* env_url = std::getenv("SERVER_URL");
     std::string default_url = (env_url && *env_url) 
                           ? std::string(env_url) 
-                          : "http://i13b101.p.ssafy.io:8080/api/raw-postures";
+                          : "https://i13b101.p.ssafy.io/siseon/api/raw-postures";
 
     // 파라미터 선언
     this->declare_parameter<std::string>("SERVER_URL", default_url);
@@ -33,10 +32,10 @@ public:
     pub_ = this->create_publisher<std_msgs::msg::String>("eye_pose", 10);
 
     // 3) Subscriber for the lidar_dist topic
-    person_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
-      "lidar_dist", 10,
-      std::bind(&EyePosNode::personCallback, this, std::placeholders::_1)
-    );
+    // person_sub_ = this->create_subscription<geometry_msgs::msg::PointStamped>(
+    //   "lidar_dist", 10,
+    //   std::bind(&EyePosNode::personCallback, this, std::placeholders::_1)
+    // );
     // 4) Start UDP receive
     start_receive();
 
@@ -60,10 +59,10 @@ public:
 
 private:
   // Callback for lidar_dist
-  void personCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
-    latest_person_ = *msg;
-    has_person_ = true;
-  }
+  // void personCallback(const geometry_msgs::msg::PointStamped::SharedPtr msg) {
+  //   latest_person_ = *msg;
+  //   has_person_ = true;
+  // }
   // UDP 수신 대기
   void start_receive() {
     socket_.async_receive_from(
@@ -79,46 +78,73 @@ private:
   void handle_receive(std::size_t length) {
     // 1) 원본 JSON 파싱
     std::string payload(buf_.data(), length);
+
+    // Sanitize payload by replacing "NaN" with "null"
+    size_t pos = 0;
+    while ((pos = payload.find("NaN", pos)) != std::string::npos) {
+        payload.replace(pos, 3, "null");
+    }
+
     try {
       auto j = json::parse(payload);
-      float left_x  = j.at("lepupil_x");
-      float left_z  = j.at("lepupil_y");
-      float right_x = j.at("repupil_x");
-      float right_z = j.at("repupil_y");
-      auto pose_xy = j.at("pose_xy");
-      float y = 1.0f;  // 기본값
-      if (has_person_) {
-        y = std::abs(latest_person_.point.y) * 100;
+
+      // pose_xyz 목록에서 유효한 3D 좌표를 찾습니다.
+      json valid_pose_point;
+      if (j.contains("pose_xyz") && j["pose_xyz"].is_array()) {
+          for (const auto& point : j["pose_xyz"]) {
+              if (point.is_array() && point.size() == 3 && !point[0].is_null() && !point[1].is_null() && !point[2].is_null()) {
+                  valid_pose_point = point;
+                  break; // 유효한 포인트를 찾았으므로 반복 중단
+              }
+          }
       }
 
-      
-      // json out_to_http = {
-      //   {"lepupil_x",    left_x},
-      //   {"lepupil_y",    left_z},
-      //   {"repupil_x",    right_x},
-      //   {"repupil_y",    right_z},
-      //   {"z", y},
-      //   {"pose_xy",      pose_xy}, 
-      // };
-      // http test
-      json out_to_http = {
-        {"profileId", 1},
-        {"x" , left_x},
-        {"y", left_z},
-        {"z", y}
-      };
-      batch_.push_back(std::move(out_to_http));
+      // 유효한 좌표를 찾지 못했다면 메시지를 건너뜁니다.
+      if (valid_pose_point.is_null()) {
+          RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
+                             "No valid pose_xyz point found. Skipping message. Payload: %s", payload.c_str());
+          return;
+      }
 
-      // out_to_fusion_node JSON 생성
-      json out_to_fusion_node = {
-        {"lefteye_x",  left_x},
-        {"lefteye_z",  left_z},
-        {"righteye_x", right_x},
-        {"righteye_z", right_z},
-        {"y",          y}
+      // fusion_node로 보낼 JSON을 생성합니다.
+      json out_to_fusion_node;
+      out_to_fusion_node["pose_xyz"] = valid_pose_point; // 찾은 유효한 좌표만 전달
+
+      // 다른 눈 관련 데이터도 존재하면 이름을 매핑하여 추가합니다.
+      const std::map<std::string, std::string> eye_field_map = {
+          {"lepupil_x", "lefteye_x"}, {"lepupil_y", "lefteye_y"}, {"lepupil_z", "lefteye_z"},
+          {"repupil_x", "righteye_x"}, {"repupil_y", "righteye_y"}, {"repupil_z", "righteye_z"}
       };
+
+      for (const auto& pair : eye_field_map) {
+          if (j.contains(pair.first) && !j[pair.first].is_null()) {
+              out_to_fusion_node[pair.second] = j[pair.first];
+          }
+      }
+      
+      // HTTP 전송용 데이터
+      bool has_lepupil_xyz = j.contains("lepupil_xyz") && j["lepupil_xyz"].is_array() && j["lepupil_xyz"].size() == 3;
+      bool has_repupil_xyz = j.contains("repupil_xyz") && j["repupil_xyz"].is_array() && j["repupil_xyz"].size() == 3;
+      if (has_lepupil_xyz || has_repupil_xyz) {
+        json out_to_http;
+        out_to_http["profileId"] = 1; // 우선 프로필 ID는 1로 고정
+        if(has_lepupil_xyz) {
+            out_to_http["gaze"] = j["lepupil_xyz"];
+        } else {
+            out_to_http["gaze"] = j["repupil_xyz"];
+        }
+
+        if(j.contains("pose_xyz")) {
+            out_to_http["pose"] = j["pose_xyz"];
+        }
+        batch_.push_back(std::move(out_to_http));
+      }
+
+      // Add timestamp to the JSON
+      out_to_fusion_node["timestamp"] = this->now().nanoseconds();
+
       auto fusion_s = out_to_fusion_node.dump();
-      RCLCPP_INFO(get_logger(), "Fused JSON: %s", fusion_s.c_str());
+      // RCLCPP_INFO(get_logger(), "Fused JSON: %s", fusion_s.c_str());
 
       // Publish the message to the ROS2 topic
       std_msgs::msg::String msg;
@@ -135,11 +161,15 @@ private:
   // 10초마다 배치된 데이터를 HTTP POST
   void onHttpTimer() {
     if (batch_.empty()) {
-      RCLCPP_INFO(this->get_logger(), "전송할 배치 데이터가 없습니다.");
+      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 10000, "전송할 HTTP 데이터가 없습니다.");
       return;
     }
-    json arr = batch_;
-    std::string http_payload = arr[0].dump();
+
+    // 배치에서 가장 최신 데이터 하나만 사용
+    json payload_json = batch_.back();
+    batch_.clear();
+    
+    std::string http_payload = payload_json.dump();
 
     CURL* curl = curl_easy_init();
     if (!curl) {
@@ -158,9 +188,8 @@ private:
       long code = 0;
       curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
       RCLCPP_INFO(this->get_logger(),
-                  "HTTP POST 성공: 코드=%ld, 배치 크기=%zu",
-                  code, batch_.size());
-      batch_.clear();
+                  "HTTP POST 성공: 코드=%ld, payload=%s",
+                  code, http_payload.c_str());
     } else {
       RCLCPP_ERROR(this->get_logger(),
                    "HTTP POST 실패: %s",
@@ -172,9 +201,9 @@ private:
   }
   // 멤버 변수
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-  rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr person_sub_;
-  geometry_msgs::msg::PointStamped latest_person_;
-  bool has_person_{false};
+  // rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr person_sub_;
+  // geometry_msgs::msg::PointStamped latest_person_;
+  // bool has_person_{false};
   
   // 2. 디버그 플래그 멤버 변수
   bool debug_;
@@ -183,7 +212,7 @@ private:
   asio::io_context io_context_;
   asio::ip::udp::socket socket_;
   asio::ip::udp::endpoint remote_ep_;
-  std::array<char,1024> buf_;
+  std::array<char,4096> buf_;
   std::thread worker_;
 
   rclcpp::TimerBase::SharedPtr http_timer_;
