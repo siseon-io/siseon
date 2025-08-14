@@ -62,6 +62,14 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   static const double _rightGap = 8.0;
   static const double _sectionIconSize = 18;
 
+  ImageProvider? _avatarProvider(dynamic src) {
+    final s = (src ?? '').toString().trim();
+    if (s.isEmpty) return null;
+    if (s.startsWith('http')) return NetworkImage(s);
+    if (s.startsWith('assets/')) return AssetImage(s);
+    return null; // 규격 밖이면 기본 아이콘 유지
+  }
+
   Map<String, dynamic>? _profile;
   List<Map<String, dynamic>> _presets = [];
 
@@ -678,17 +686,9 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   const SizedBox(width: 2),
                   CircleAvatar(
                     radius: 24,
-                    backgroundImage: (() {
-                      final imageUrl = _profile?['imageUrl'];
-                      if (imageUrl != null) {
-                        if (imageUrl.toString().startsWith('http')) {
-                          return NetworkImage(imageUrl);
-                        } else if (imageUrl.toString().startsWith('assets/')) {
-                          return AssetImage(imageUrl) as ImageProvider;
-                        }
-                      }
-                      return const AssetImage('assets/images/profile_cat.png');
-                    })(),
+                    backgroundColor: const Color(0xFF1F2937),
+                    foregroundImage: _avatarProvider(_profile?['imageUrl']), // 없으면 null
+                    child: const Icon(Icons.person, size: 24, color: Colors.white30),
                   ),
                   const SizedBox(width: 10),
                   Expanded(

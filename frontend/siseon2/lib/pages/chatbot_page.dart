@@ -122,17 +122,19 @@ class _ChatbotPageState extends State<ChatbotPage> {
   Future<void> _loadUserAvatar() async {
     try {
       final prof = await ProfileCacheService.loadProfile();
-      final imageUrl = prof?['imageUrl'];
-      ImageProvider img;
-      if (imageUrl != null && imageUrl.toString().startsWith('http')) {
-        img = NetworkImage(imageUrl);
-      } else if (imageUrl != null && imageUrl.toString().startsWith('assets/')) {
-        img = AssetImage(imageUrl);
-      } else {
-        img = const AssetImage('assets/images/profile_cat.png');
+      final imageUrl = prof?['imageUrl']?.toString().trim();
+      ImageProvider? img;
+
+      if (imageUrl != null && imageUrl.isNotEmpty) {
+        if (imageUrl.startsWith('http')) {
+          img = NetworkImage(imageUrl);
+        } else if (imageUrl.startsWith('assets/')) {
+          img = AssetImage(imageUrl);
+        }
       }
+
       if (!mounted) return;
-      setState(() => _userAvatar = img);
+      setState(() => _userAvatar = img); // ✅ 없으면 null 그대로 (기본 아이콘 표시됨)
     } catch (_) {}
   }
 
@@ -511,16 +513,12 @@ class _ChatbotPageState extends State<ChatbotPage> {
   }
 
   Widget _userAvatarWidget() {
-    final img = _userAvatar;
-    if (img == null) {
-      return Container(
-        width: avatarSize, height: avatarSize,
-        decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), shape: BoxShape.circle),
-        alignment: Alignment.center,
-        child: const Text('U', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w700)),
-      );
-    }
-    return CircleAvatar(radius: avatarSize / 2, backgroundImage: img);
+    return CircleAvatar(
+      radius: avatarSize / 2,
+      backgroundColor: const Color(0xFF1F2937),
+      foregroundImage: _userAvatar, // 이미지 있으면 표시
+      child: const Icon(Icons.person, size: 22, color: Colors.white30), // 없으면 아이콘
+    );
   }
 
   Widget _buildBubble({required String content, required String timeStr, required bool isUser}) {

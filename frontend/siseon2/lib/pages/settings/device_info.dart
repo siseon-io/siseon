@@ -181,7 +181,7 @@ class _DeviceInfoPageState extends State<DeviceInfoPage> {
       if (imageUrl.toString().startsWith('http')) return NetworkImage(imageUrl);
       return AssetImage(imageUrl);
     }
-    return const AssetImage('assets/images/profile_cat.png');
+    return const AssetImage('assets/images/profile_blueman.png');
   }
 
   @override
