@@ -439,7 +439,8 @@ class _RootScreenState extends State<RootScreen> {
     final pages = [
       HomeScreen(
         key: _homeKey,
-        onAiModeSwitch: _handleAiModeFromHome, // 홈 토글 → 로컬 알림/동기화
+        onAiModeSwitch: _handleAiModeFromHome,
+        // 홈 토글 → 로컬 알림/동기화
         onGoToProfile: _goToSettingsPage,
         currentMode: _currentMode,
         onModeChange: (mode) {
@@ -460,7 +461,8 @@ class _RootScreenState extends State<RootScreen> {
               if (mounted) {
                 setState(() => _writableChar = null);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('🔌 BLE 연결이 끊어졌습니다. 홈에서 다시 연결해주세요.')),
+                  const SnackBar(
+                      content: Text('🔌 BLE 연결이 끊어졌습니다. 홈에서 다시 연결해주세요.')),
                 );
               }
             }
@@ -484,11 +486,17 @@ class _RootScreenState extends State<RootScreen> {
       const SettingsPage(),
     ];
 
+// ⛳️ build() 안의 return 부분만 변경
     return Scaffold(
       backgroundColor: rootBackground,
-      body: pages[_currentIndex],
+      // 👇 여기! 한 줄 교체
+      // body: pages[_currentIndex],
+      body: IndexedStack(
+        index: _currentIndex,
+        children: pages,
+      ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _handleAiModeTap, // ✅ AI 전환도 가드 + MQTT 발행
+        onPressed: _handleAiModeTap,
         backgroundColor: primaryBlue,
         child: const Icon(Icons.remove_red_eye, size: 30, color: Colors.white),
       ),

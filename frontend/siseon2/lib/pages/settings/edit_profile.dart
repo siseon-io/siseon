@@ -553,9 +553,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
             _buildField(
               _heightController,
               '키 (cm)',
-              '예: 170.5',
+              '예: 170',
               Icons.straighten,
-              const TextInputType.numberWithOptions(decimal: true),
+              TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
             ),
             const SizedBox(height: 16),
             GestureDetector(
@@ -580,6 +581,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                     '예: 1.0',
                     Icons.remove_red_eye,
                     const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -590,6 +592,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                     '예: 1.0',
                     Icons.remove_red_eye_outlined,
                     const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
                   ),
                 ),
               ],
@@ -623,12 +626,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
       String label,
       String hint,
       IconData icon,
-      TextInputType kt,
-      ) {
+      TextInputType kt, {
+        List<TextInputFormatter>? inputFormatters, // ✅ 추가
+      }) {
     return TextField(
       controller: c,
       style: const TextStyle(color: AppColors.text),
       keyboardType: kt,
+      inputFormatters: inputFormatters,        // ✅ 추가
       decoration: InputDecoration(
         filled: true,
         fillColor: AppColors.card,
