@@ -6,6 +6,8 @@
 #include <thread>
 #include <cmath>
 #include <curl/curl.h>
+#include <fstream>
+#include <mutex>
 
 using json = nlohmann::json;
 
@@ -88,58 +90,40 @@ private:
     try {
       auto j = json::parse(payload);
 
-      // pose_xyz 목록에서 유효한 3D 좌표를 찾습니다.
-      json valid_pose_point;
-      if (j.contains("pose_xyz") && j["pose_xyz"].is_array()) {
-          for (const auto& point : j["pose_xyz"]) {
-              if (point.is_array() && point.size() == 3 && !point[0].is_null() && !point[1].is_null() && !point[2].is_null()) {
-                  valid_pose_point = point;
-                  break; // 유효한 포인트를 찾았으므로 반복 중단
-              }
-          }
-      }
-
-      // 유효한 좌표를 찾지 못했다면 메시지를 건너뜁니다.
-      if (valid_pose_point.is_null()) {
-          RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000, 
-                             "No valid pose_xyz point found. Skipping message. Payload: %s", payload.c_str());
+      // 1. pose_xyz에 좌/우 눈 데이터가 있는지 확인합니다. (인덱스 1, 2)
+      if (!j.contains("pose_xyz") || !j["pose_xyz"].is_array() || j["pose_xyz"].size() < 3) {
+          RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                             "pose_xyz does not contain enough data for eyes. Skipping.");
           return;
       }
 
-      // fusion_node로 보낼 JSON을 생성합니다.
-      json out_to_fusion_node;
-      out_to_fusion_node["pose_xyz"] = valid_pose_point; // 찾은 유효한 좌표만 전달
+      const auto& lefteye_coords = j["pose_xyz"][1];
+      const auto& righteye_coords = j["pose_xyz"][2];
 
-      // 다른 눈 관련 데이터도 존재하면 이름을 매핑하여 추가합니다.
-      const std::map<std::string, std::string> eye_field_map = {
-          {"lepupil_x", "lefteye_x"}, {"lepupil_y", "lefteye_y"}, {"lepupil_z", "lefteye_z"},
-          {"repupil_x", "righteye_x"}, {"repupil_y", "righteye_y"}, {"repupil_z", "righteye_z"}
-      };
-
-      for (const auto& pair : eye_field_map) {
-          if (j.contains(pair.first) && !j[pair.first].is_null()) {
-              out_to_fusion_node[pair.second] = j[pair.first];
-          }
+      // 2. 좌/우 눈 데이터가 유효한지 확인합니다.
+      if (!lefteye_coords.is_array() || lefteye_coords.size() != 3 || lefteye_coords[0].is_null() ||
+          !righteye_coords.is_array() || righteye_coords.size() != 3 || righteye_coords[0].is_null())
+      {
+          RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+                             "Left/Right eye data in pose_xyz is invalid. Skipping.");
+          return;
       }
+
+      // 3. fusion_node로 보낼 JSON을 생성합니다.
+      json out_to_fusion_node;
+      out_to_fusion_node["lefteye_x"] = lefteye_coords[0];
+      out_to_fusion_node["lefteye_y"] = lefteye_coords[1];
+      out_to_fusion_node["lefteye_z"] = lefteye_coords[2];
+      out_to_fusion_node["righteye_x"] = righteye_coords[0];
+      out_to_fusion_node["righteye_y"] = righteye_coords[1];
+      out_to_fusion_node["righteye_z"] = righteye_coords[2];
       
       // HTTP 전송용 데이터
-      bool has_lepupil_xyz = j.contains("lepupil_xyz") && j["lepupil_xyz"].is_array() && j["lepupil_xyz"].size() == 3;
-      bool has_repupil_xyz = j.contains("repupil_xyz") && j["repupil_xyz"].is_array() && j["repupil_xyz"].size() == 3;
-      if (has_lepupil_xyz || has_repupil_xyz) {
-        json out_to_http;
-        out_to_http["profileId"] = 1; // 우선 프로필 ID는 1로 고정
-        if(has_lepupil_xyz) {
-            out_to_http["gaze"] = j["lepupil_xyz"];
-        } else {
-            out_to_http["gaze"] = j["repupil_xyz"];
-        }
-
-        if(j.contains("pose_xyz")) {
-            out_to_http["pose"] = j["pose_xyz"];
-        }
-        batch_.push_back(std::move(out_to_http));
+      {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        latest_udp_data_ = j;
       }
-
+      
       // Add timestamp to the JSON
       out_to_fusion_node["timestamp"] = this->now().nanoseconds();
 
@@ -160,16 +144,78 @@ private:
 
   // 10초마다 배치된 데이터를 HTTP POST
   void onHttpTimer() {
-    if (batch_.empty()) {
-      RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 10000, "전송할 HTTP 데이터가 없습니다.");
-      return;
+    json j;
+    {
+        std::lock_guard<std::mutex> lock(data_mutex_);
+        if (latest_udp_data_.is_null()) {
+            RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 10000, "전송할 UDP 데이터가 없습니다.");
+            return;
+        }
+        j = latest_udp_data_;
+        latest_udp_data_.clear(); // 한번 보낸 데이터는 비움
     }
 
-    // 배치에서 가장 최신 데이터 하나만 사용
-    json payload_json = batch_.back();
-    batch_.clear();
+    // 1. 프로필 ID 읽기
+    int profile_id = 1; // 기본값
+    std::ifstream profile_file("profile.json");
+    if (profile_file.is_open()) {
+        try {
+            json profile_json;
+            profile_file >> profile_json;
+            if (profile_json.contains("profileId")) {
+                // profileId가 문자열일 경우를 대비하여 stoi 사용
+                profile_id = std::stoi(profile_json["profileId"].get<std::string>());
+            }
+        } catch (const std::exception& e) {
+            RCLCPP_WARN(this->get_logger(), "profile.json 파싱 실패: %s", e.what());
+        }
+    }
+
+    // 2. 새로운 JSON 양식 구성
+    json payload_to_send;
+    payload_to_send["profileId"] = profile_id;
+
+    // user_coord 구성
+    json user_coord;
+    auto get_xyz = [](const json& arr) -> json {
+        if (arr.is_array() && arr.size() == 3 && !arr[0].is_null()) {
+            return {{"x", arr[0]}, {"y", arr[1]}, {"z", arr[2]}};
+        }
+        return {{"x", 0}, {"y", 0}, {"z", 0}}; // 유효하지 않으면 0으로 채움
+    };
+
+    if (j.contains("lepupil_xyz")) user_coord["le_pupil"] = get_xyz(j["lepupil_xyz"]);
+    if (j.contains("repupil_xyz")) user_coord["re_pupil"] = get_xyz(j["repupil_xyz"]);
+
+    const std::vector<std::string> pose_keys = {
+        "nose", "le_eye", "re_eye", "le_ear", "re_ear",
+        "le_shoulder", "re_shoulder", "le_elbow", "re_elbow",
+        "le_wrist", "re_wrist", "le_hip", "re_hip",
+        "le_knee", "re_knee", "le_ankle", "re_ankle"
+    };
     
-    std::string http_payload = payload_json.dump();
+    json pose_data;
+    if (j.contains("pose_xyz") && j["pose_xyz"].is_array()) {
+        for (size_t i = 0; i < std::min(pose_keys.size(), j["pose_xyz"].size()); ++i) {
+            pose_data[pose_keys[i]] = get_xyz(j["pose_xyz"][i]);
+        }
+    }
+    user_coord["pose_data"] = pose_data;
+    payload_to_send["userCoord"] = user_coord;
+
+    // monitor_coord 구성
+    json monitor_coord = {{"x", 0}, {"y", 0}, {"z", 0}};
+    if (j.contains("pose_xyz") && j["pose_xyz"].is_array()) {
+        for (const auto& point : j["pose_xyz"]) {
+            if (point.is_array() && point.size() == 3 && !point[0].is_null()) {
+                monitor_coord = get_xyz(point);
+                break;
+            }
+        }
+    }
+    payload_to_send["monitorCoord"] = monitor_coord;
+
+    std::string http_payload = payload_to_send.dump(4); // 4는 들여쓰기
 
     CURL* curl = curl_easy_init();
     if (!curl) {
@@ -201,9 +247,8 @@ private:
   }
   // 멤버 변수
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_;
-  // rclcpp::Subscription<geometry_msgs::msg::PointStamped>::SharedPtr person_sub_;
-  // geometry_msgs::msg::PointStamped latest_person_;
-  // bool has_person_{false};
+  std::mutex data_mutex_;
+  json latest_udp_data_;
   
   // 2. 디버그 플래그 멤버 변수
   bool debug_;
