@@ -35,9 +35,9 @@ public:
     declare_parameter<double>("z0_mm",900.0);
     declare_parameter<double>("x_span_mm",180.0);
     declare_parameter<double>("z_span_mm",140.0);
-    declare_parameter<double>("alpha",0.25);
+    declare_parameter<double>("alpha",0.35);
     load_anchors();
-    pub_ = create_publisher<arm_control_node::msg::CmdPose>("/cmd_pose", rclcpp::QoS(1).transient_local());
+    pub_ = create_publisher<arm_control_node::msg::CmdPose>("/cmd_pose", rclcpp::QoS(0).transient_local());
     sub_ = create_subscription<std_msgs::msg::String>("/eye_pose", 10, std::bind(&FusionNode::on_eye, this, std::placeholders::_1));
     timer_ = create_wall_timer(20ms, std::bind(&FusionNode::loop,this));
     RCLCPP_INFO(get_logger(),"✅ fusion_node started (uses JSON anchors, prints sx/sy).");
@@ -56,10 +56,10 @@ private:
     auto Df=get_parameter("down_json").as_string();
     auto join=[&](const std::string& a,const std::string& b){ if(a.empty()) return b; return a.back()=='/'?a+b:a+"/"+b; };
     // 기본 앵커(네가 준 값)
-    std::array<double,4> L{+2.8149,+0.2209,+0.2792,-0.1012};
-    std::array<double,4> R{-2.6569,+0.2040,+0.1749,-0.0583};
-    std::array<double,4> U{-3.1309,+0.2255,-0.3206,+0.5123};
-    std::array<double,4> D{-3.1170,+0.3375,+0.7440,-0.7624};
+    std::array<double,4> L{+2.8149+M_PI,+0.2209,+0.2792,-0.1012};
+    std::array<double,4> R{-2.6569+M_PI,+0.2040,+0.1749,-0.0583};
+    std::array<double,4> U{0,+0.2255,-0.3206,+0.5123};
+    std::array<double,4> D{0,+0.3375,+0.7440,-0.7624};
     std::array<double,4> t;
     if(load_rad4_from_json(join(dir,Lf),t)) L=t;
     if(load_rad4_from_json(join(dir,Rf),t)) R=t;
@@ -97,7 +97,7 @@ private:
     double sy=std::clamp((z0 - z_mm)/zs,-1.0,1.0); // ↑위로 갈수록 sy 증가(반전 보정)
     double t_lr=0.5*(sx+1.0), t_ud=0.5*(sy+1.0);
     auto lerp=[](double a,double b,double t){return a*(1.0-t)+b*t;};
-    double q11=slerp_angle(left_q11_, right_q11_, t_lr);
+    double q11 = slerp_angle(right_q11_, left_q11_, t_lr);
     double q12=lerp(down_q12_, up_q12_, t_ud);
     double q13=lerp(down_q13_, up_q13_, t_ud);
     double q14=lerp(down_q14_, up_q14_, t_ud);

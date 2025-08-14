@@ -51,7 +51,7 @@ public:
     declare_parameter<double>("a_j14", 1.0); declare_parameter<double>("b_j14", 0.0);
 
     // 안전 리밋 (필요시 조정)
-    declare_parameter<double>("min_j11", -M_PI); declare_parameter<double>("max_j11",  M_PI);
+    declare_parameter<double>("min_j11", -M_PI/4.0); declare_parameter<double>("max_j11", M_PI/4.0);
     declare_parameter<double>("min_j12",  0.00); declare_parameter<double>("max_j12",  0.95);
     declare_parameter<double>("min_j13", -1.65); declare_parameter<double>("max_j13",  1.10);
     declare_parameter<double>("min_j14", -1.20); declare_parameter<double>("max_j14",  1.20);
@@ -107,8 +107,9 @@ private:
   bool use_limits_{true};
   std::array<double,4> a_{1.0,1.0,1.0,1.0};
   std::array<double,4> b_{0.0,0.0,0.0,0.0};
-  std::array<double,4> qmin_{-M_PI, 0.00, -1.65, -1.20};
-  std::array<double,4> qmax_{ M_PI, 0.95,  1.10,  1.20};
+  std::array<double,4> qmin_{-M_PI/4.0, 0.00, -1.65, -1.20};
+  std::array<double,4> qmax_{ M_PI/4.0, 0.95,  1.10,  1.20};
+
 
   // --- 유틸 ---
   static inline double wrap_pi(double x) {
@@ -124,31 +125,22 @@ private:
     return (static_cast<double>(pos - DXL_MINIMUM_POSITION_VALUE) / DXL_MAXIMUM_POSITION_VALUE)
            * 2.0 * M_PI - M_PI;
   }
-  
+
   inline double apply(size_t i, double raw)
   {
-  if (i == 0) {
-    // ── joint 11: 기준각 π(180°)를 중심으로 ±π/4 제한 ──
-    const double center = M_PI;
-    // (raw - π)를 [-π,π]로 래핑해서 경계점에서 점프 방지
-    double delta = wrap_pi(raw - center);
+    if (i == 0) {
+      // joint11: 정면 0rad 기준, "사람 오른쪽=+, 왼쪽=–"
+      // 필요하면 dir_j11_ = -1.0 으로 바꿔서 즉시 반전 가능
+      double delta = wrap_pi(raw);     // 방향 반영 + 경계 점프 방지
+      double lim   = std::min(std::abs(qmin_[0]), std::abs(qmax_[0])); // 보장된 대칭 한계
+      delta = std::clamp(delta, -lim, lim);       // ±limit 로 제한
+      return delta;                                // center=0이므로 그대로 반환
+    }
 
-    // (옵션) 보정이 켜져 있으면 delta에만 보정 적용
-    if (use_calib_) delta = a_[0]*delta + b_[0];
-
-    // ±π/4로 제한
-    const double lim = M_PI / 4.0;
-    delta = std::clamp(delta, -lim, lim);
-
-    // 최종 값은 center(π) 기준으로 되돌리고 한 번 더 래핑
-    double v = wrap_pi(center + delta);
-    return v;  // joint11은 항상 이 제한을 따르게 함
-  }
-
-  // ── 나머지 관절(12~14)은 기존 로직 유지 ──
-  double v = use_calib_ ? (a_[i]*raw + b_[i]) : raw;
-  if (use_limits_) v = std::clamp(v, qmin_[i], qmax_[i]);
-  return v;
+    // ── 나머지 관절(12~14)은 기존 로직 유지 ──
+    double v = use_calib_ ? (a_[i]*raw + b_[i]) : raw;
+    if (use_limits_) v = std::clamp(v, qmin_[i], qmax_[i]);
+    return v;
   }
 
   void load_params_(){
@@ -164,6 +156,7 @@ private:
     qmin_[1] = get_parameter("min_j12").as_double(); qmax_[1] = get_parameter("max_j12").as_double();
     qmin_[2] = get_parameter("min_j13").as_double(); qmax_[2] = get_parameter("max_j13").as_double();
     qmin_[3] = get_parameter("min_j14").as_double(); qmax_[3] = get_parameter("max_j14").as_double();
+
   }
 
   rcl_interfaces::msg::SetParametersResult
@@ -199,18 +192,18 @@ private:
       apply(2, q_raw[2]),
       apply(3, q_raw[3])
     };
-
+    
     for (const auto& it : std::vector<std::pair<std::string,double>>{
           {"joint1", q[0]}, {"joint2", q[1]}, {"joint3", q[2]}, {"joint4", q[3]} }){
       int id   = joint_to_id_[it.first];
-      int goal = rad2dxl_(it.second);
+      int goal = rad2dxl_(it.second); 
       uint8_t err = 0;
       int rc = packet_->write4ByteTxRx(port_, id, ADDR_GOAL_POSITION, goal, &err);
       if (rc != COMM_SUCCESS)
         RCLCPP_ERROR(get_logger(), "ID %d comm fail: %s", id, packet_->getTxRxResult(rc));
       else if (err)
         RCLCPP_ERROR(get_logger(), "ID %d hw err: %s",  id, packet_->getRxPacketError(err));
-    }
+    }  
 
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 200,
       "q_raw=[%.4f, %.4f, %.4f, %.4f] -> q_send=[%.4f, %.4f, %.4f, %.4f]",
