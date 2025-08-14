@@ -1,6 +1,6 @@
 // lib/pages/home_screen.dart
 import 'dart:async';
-import 'dart:convert';
+import 'dart:convert'; // ← mojibake 복구에 사용
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -96,6 +96,9 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _loadingPosture = false;
   PostureBannerStatus _postureStatus = PostureBannerStatus.none;
 
+  // 🔹 배너용: 최신 나쁜자세 라벨들
+  List<String> _badLabels = [];
+
   bool get _bleReady => bleSession.isReady;
 
   void _copyFromSession() {
@@ -118,7 +121,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _checkBluetoothState();
     _syncProfileAndDevice();
     _loadLatestPosture(); // 첫 로딩은 스피너 보임
-    _startPolling();      // 1분 폴링 시작
+    _startPolling(); // 1분 폴링 시작
 
     bleSession.addListener(_onBleSessionChanged);
     _copyFromSession();
@@ -161,7 +164,10 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _startPolling() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(minutes: 1), (_) => _refreshSilently());
+    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) return;
+      _refreshSilently();
+    });
   }
 
   void _stopPolling() {
@@ -174,7 +180,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _isPolling = true;
     try {
       await _loadLatestPosture(silent: true); // 스피너 없이
-      await _loadDailyStats();                // 오늘 통계도 갱신
+      await _loadDailyStats(); // 오늘 통계도 갱신
     } finally {
       _isPolling = false;
     }
@@ -253,7 +259,9 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() {
       _isDeviceRegistered = device != null;
       _deviceSerial = device?['serial'];
-      _targetCharUuid = device?['targetCharUuid'] ?? device?['charUuid'] ?? device?['characteristicUuid'];
+      _targetCharUuid = device?['targetCharUuid'] ??
+          device?['charUuid'] ??
+          device?['characteristicUuid'];
       _deviceStateReady = true;
     });
 
@@ -326,60 +334,179 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         setState(() {
           _postureStatus = PostureBannerStatus.none;
           _postureTime = null;
+          _badLabels = [];
           _loadingPosture = false;
         });
         return;
       }
 
-      final now = DateTime.now();
-      final lookback = now.subtract(const Duration(hours: 12));
-
-      final list = await StatsService.fetchPostureStats(
+      // ✅ 통계 페이지와 동일한 minute 기준으로 조회
+      final mins = await StatsService.fetchMinuteStats(
         profileId: profileId,
         period: 'daily',
-        from: lookback,
-        to: now,
       );
 
-      if (list.isEmpty) {
+      if (mins.isEmpty) {
         setState(() {
           _postureStatus = PostureBannerStatus.none;
           _postureTime = null;
+          _badLabels = [];
           _loadingPosture = false;
         });
         return;
       }
 
-      list.sort((a, b) => a.endAt.compareTo(b.endAt));
-      final latest = list.last;
-      final v = _valid(latest);
+      // 최신순 정렬 후, "가장 최근 minute" 하나로 현재 상태 결정
+      mins.sort((a, b) => a.endAt.compareTo(b.endAt));
+      final latest = mins.last;
 
-      setState(() {
-        _postureStatus = (v == true)
-            ? PostureBannerStatus.good
-            : (v == false)
-            ? PostureBannerStatus.bad
-            : PostureBannerStatus.none;
-        _postureTime = latest.endAt.toLocal();
-        _loadingPosture = false;
-      });
+      // 유연한 valid 판정 (validPosture / valid / badReasons.valid)
+      bool? isValid = latest.validPosture;
+      try { final v2 = (latest as dynamic).valid; if (v2 is bool) isValid = v2; } catch (_) {}
+      try {
+        final br = (latest as dynamic).badReasons;
+        final v3 = (br as dynamic).valid;
+        if (v3 is bool) isValid = v3;
+      } catch (_) {}
+
+      if (isValid == false) {
+        // ❌ 최신 분이 "나쁨": 최신 분의 summary에서 라벨 추출
+        final labels = _extractBadLabels(latest);
+        setState(() {
+          _postureStatus = PostureBannerStatus.bad;
+          _postureTime   = latest.endAt.toLocal();
+          _badLabels     = labels;
+          _loadingPosture = false;
+        });
+      } else if (isValid == true) {
+        // ✅ 최신 분이 "좋음"
+        setState(() {
+          _postureStatus = PostureBannerStatus.good;
+          _postureTime   = latest.endAt.toLocal();
+          _badLabels     = [];
+          _loadingPosture = false;
+        });
+      } else {
+        // 값이 애매하면 숨김
+        setState(() {
+          _postureStatus = PostureBannerStatus.none;
+          _postureTime = null;
+          _badLabels = [];
+          _loadingPosture = false;
+        });
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _postureStatus = PostureBannerStatus.none;
         _postureTime = null;
+        _badLabels = [];
         _loadingPosture = false;
       });
     }
   }
 
+
+
+
+
+  /// 🔹 valid 여부를 최대한 유연하게 판단 (validPosture, valid, badReasons.valid 지원)
   bool? _valid(PostureStats s) {
     try {
       final v = (s as dynamic).validPosture;
       if (v is bool) return v;
     } catch (_) {}
+    try {
+      final v2 = (s as dynamic).valid;
+      if (v2 is bool) return v2;
+    } catch (_) {}
+    try {
+      final br = (s as dynamic).badReasons;
+      final v3 = (br as dynamic).valid;
+      if (v3 is bool) return v3;
+    } catch (_) {}
     return null;
   }
+
+  // ===== Mojibake 복구 유틸 =====
+  // 서버가 UTF-8 바이트를 라틴1로 잘못 디코딩해 보낸 문자열을 복원
+  String _fixKoreanIfGarbled(String s) {
+    final looksGarbled = RegExp(r'(Ã.|Â.|ì.|í.|ë.|ê.|°|±|²|³|¼|½|¾)')
+        .hasMatch(s) &&
+        !RegExp(r'[가-힣]').hasMatch(s);
+    if (!looksGarbled) return s;
+    try {
+      final repaired = utf8.decode(latin1.encode(s));
+      // 복구 후 한글이 생기면 그걸 사용
+      if (RegExp(r'[가-힣]').hasMatch(repaired)) return repaired;
+      return s;
+    } catch (_) {
+      return s;
+    }
+  }
+
+  String _cleanLabel(String input) {
+    final fixed = _fixKoreanIfGarbled(input);
+    return fixed.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  /// 🔹 최신 아이템에서 badReasons.reasons[].label 또는 summary에서 라벨 추출
+  /// 🔹 최신 아이템에서 "summary"만 우선으로 라벨 추출 (각도/괄호 제거)
+  List<String> _extractBadLabels(dynamic item) {
+    final labels = <String>[];
+
+    void _collectFromSummary(String? sum) {
+      if (sum == null || sum.trim().isEmpty) return;
+      // 한글 깨짐 복구 + 공백 정리
+      final fixed = _fixKoreanIfGarbled(sum).trim();
+      // 예: "거북목(148.8°), 굽은 어깨(37.3°), 등 굽음(77.5°)"
+      for (final part in fixed.split(RegExp(r'\s*,\s*'))) {
+        if (part.isEmpty) continue;
+        // 괄호 뒤(각도 등)는 잘라내고 이름만
+        final nameOnly = part.split('(').first.trim();
+        if (nameOnly.isNotEmpty) {
+          labels.add(nameOnly);
+        }
+      }
+    }
+
+    // 1) badReasons.summary 우선
+    try {
+      final br = (item as dynamic).badReasons;
+      if (br != null) {
+        final sum = (br as dynamic).summary?.toString();
+        _collectFromSummary(sum);
+      }
+    } catch (_) {}
+
+    // 2) top-level summary 보조
+    if (labels.isEmpty) {
+      try {
+        final sum2 = (item as dynamic).summary?.toString();
+        _collectFromSummary(sum2);
+      } catch (_) {}
+    }
+
+    // 3) 최후 보루: reasons[].label (summary가 없을 때만)
+    if (labels.isEmpty) {
+      try {
+        final br = (item as dynamic).badReasons;
+        final rs = (br as dynamic).reasons;
+        if (rs is Iterable) {
+          for (final r in rs) {
+            final lbl = (r as dynamic).label;
+            if (lbl is String && lbl.trim().isNotEmpty) {
+              labels.add(_cleanLabel(lbl));
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 중복 제거
+    return labels.toSet().toList();
+  }
+
 
   // ─────────── 등록/스캔/연결 ───────────
   Future<void> _registerDevice() async {
@@ -576,7 +703,10 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final token = await AuthService.getValidAccessToken();
       await http.post(
         Uri.parse('https://i13b101.p.ssafy.io/siseon/api/preset-coordinate'),
-        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token'
+        },
         body: jsonEncode({"profile_id": profileId, "preset_id": presetId}),
       );
       _setMode(ControlMode.preset);
@@ -594,8 +724,8 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return;
     }
     final profileId = _profile!['id'];
-    final created =
-    await PresetService.createPreset('프리셋 ${_presets.length + 1}', profileId, 1);
+    final created = await PresetService.createPreset('프리셋 ${_presets.length + 1}',
+        profileId, 1);
     if (created != null) await _loadProfileAndPresets();
   }
 
@@ -646,7 +776,8 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(title,
-            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            style: const TextStyle(
+                color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
         if (onTap != null)
           IconButton(
             onPressed: onTap,
@@ -675,80 +806,99 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Scaffold(
       backgroundColor: backgroundBlack,
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const SizedBox(width: 2),
-                  CircleAvatar(
-                    radius: 24,
-                    backgroundColor: const Color(0xFF1F2937),
-                    foregroundImage: _avatarProvider(_profile?['imageUrl']), // 없으면 null
-                    child: const Icon(Icons.person, size: 24, color: Colors.white30),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Transform.translate(
-                      offset: const Offset(0, 4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
+        child: RefreshIndicator(
+          color: Colors.white,
+          backgroundColor: primaryBlue,
+          onRefresh: _refreshSilently, // ⬅️ 당겨서 새로고침 -> 기존 로직 재사용
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(), // ⬅️ 내용이 짧아도 pull 동작
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ⬇️ 기존 내용 그대로
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          Text(
-                            _profile!['name'] ?? '사용자',
-                            style: const TextStyle(
-                                fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white, height: 1.15),
+                          const SizedBox(width: 2),
+                          CircleAvatar(
+                            radius: 24,
+                            backgroundColor: const Color(0xFF1F2937),
+                            foregroundImage: _avatarProvider(_profile?['imageUrl']),
+                            child: const Icon(Icons.person, size: 24, color: Colors.white30),
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            _profile!['email'] ?? '',
-                            style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.1),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Transform.translate(
+                              offset: const Offset(0, 4),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    _profile!['name'] ?? '사용자',
+                                    style: const TextStyle(
+                                        fontSize: 18, fontWeight: FontWeight.bold,
+                                        color: Colors.white, height: 1.15),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _profile!['email'] ?? '',
+                                    style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.1),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.settings, color: Colors.white),
+                            onPressed: () async {
+                              final changed = await Navigator.push(
+                                  context, MaterialPageRoute(builder: (_) => const EditProfilePage()));
+                              if (changed == true) {
+                                await _loadProfileAndPresets();
+                              }
+                              if (!mounted) return;
+                              _refreshSilently(); // (선택) 돌아오면 즉시 한번 더 갱신
+                            },
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
                           ),
                         ],
                       ),
-                    ),
+
+                      const SizedBox(height: 12),
+                      _buildTopGrid(_bleReady),
+                      const SizedBox(height: 14),
+                      _postureBanner(),
+                      const SizedBox(height: 12),
+
+                      _sectionHeader(title: '오늘 통계'),
+                      const SizedBox(height: 8),
+                      _buildTodayStatsCard(),
+
+                      const SizedBox(height: 18),
+                      _sectionHeader(
+                        title: '프리셋',
+                        onTap: () async {
+                          final changed = await Navigator.push(
+                              context, MaterialPageRoute(builder: (_) => const PresetPage()));
+                          if (changed == true) await _loadProfileAndPresets();
+                          if (!mounted) return;
+                          _refreshSilently(); // (선택) 복귀 즉시 갱신
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      _buildPresetArea(),
+                    ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.settings, color: Colors.white),
-                    onPressed: () async {
-                      final changed =
-                      await Navigator.push(context, MaterialPageRoute(builder: (_) => const EditProfilePage()));
-                      if (changed == true) {
-                        _loadProfileAndPresets();
-                      }
-                    },
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 12),
-              _buildTopGrid(isConnected),
-              const SizedBox(height: 14),
-              _postureBanner(),
-              const SizedBox(height: 12),
-
-              _sectionHeader(title: '오늘 통계'),
-              const SizedBox(height: 8),
-              _buildTodayStatsCard(),
-
-              const SizedBox(height: 18),
-              _sectionHeader(
-                title: '프리셋',
-                onTap: () async {
-                  final changed =
-                  await Navigator.push(context, MaterialPageRoute(builder: (_) => const PresetPage()));
-                  if (changed == true) await _loadProfileAndPresets();
-                },
-              ),
-              const SizedBox(height: 10),
-              _buildPresetArea(),
-            ],
+                ),
+              );
+            },
           ),
         ),
       ),
@@ -760,7 +910,10 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(flex: 2, child: SizedBox(height: leftHeight, child: _modeStatusCardCentered())),
+        Expanded(
+            flex: 2,
+            child:
+            SizedBox(height: leftHeight, child: _modeStatusCardCentered())),
         const SizedBox(width: 10),
         Expanded(
           flex: 1,
@@ -805,12 +958,16 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('모드 상태', style: TextStyle(color: Colors.white54, fontSize: 14)),
+                const Text('모드 상태',
+                    style: TextStyle(color: Colors.white54, fontSize: 14)),
                 const SizedBox(height: 6),
                 Text(
                   _mode == ControlMode.off ? '전원 꺼짐' : _mode.name.toUpperCase(),
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: _getModeColor(), fontSize: 26, fontWeight: FontWeight.w800),
+                  style: TextStyle(
+                      color: _getModeColor(),
+                      fontSize: 26,
+                      fontWeight: FontWeight.w800),
                 ),
               ],
             ),
@@ -852,7 +1009,8 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const SnackBar(content: Text('🔌 BLE 연결을 해제했습니다.')),
             );
           },
-          child: const Icon(Icons.bluetooth_connected, color: primaryBlue, size: iconSize),
+          child: const Icon(Icons.bluetooth_connected,
+              color: primaryBlue, size: iconSize),
         )
             : IconButton(
           tooltip: '스캔',
@@ -879,7 +1037,8 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: SizedBox(
           width: 54,
           height: 12,
-          child: DecoratedBox(decoration: BoxDecoration(color: Colors.white12)),
+          child:
+          DecoratedBox(decoration: BoxDecoration(color: Colors.white12)),
         ),
       ),
     );
@@ -892,32 +1051,78 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         outlineColor: primaryBlue.withOpacity(0.45),
         child: const Row(
           children: [
-            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+            SizedBox(
+              width: 18,
+              height: 18,
+              child:
+              CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            ),
             SizedBox(width: 8),
-            Expanded(child: Text('최근 자세 데이터를 불러오는 중...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600))),
+            Expanded(
+              child: Text(
+                '최근 자세 데이터를 불러오는 중...',
+                style:
+                TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              ),
+            ),
           ],
         ),
       );
     }
 
-    if (_postureStatus == PostureBannerStatus.none) return const SizedBox.shrink();
+    if (_postureStatus == PostureBannerStatus.none) {
+      return const SizedBox.shrink();
+    }
 
     final isGood = _postureStatus == PostureBannerStatus.good;
-    final title = isGood ? '올바른 자세입니다! 대단해요!' : '잘못된 자세입니다! 교정해주세요!';
+    final isBad = _postureStatus == PostureBannerStatus.bad;
+    final hasLabels = isBad && _badLabels.isNotEmpty;
+
+    final title = hasLabels
+        ? '${_badLabels.join(', ')}이(가) 감지됩니다.'
+        : (isGood ? '올바른 자세입니다. 유지해주세요!' : '잘못된 자세입니다. 교정해주세요!');
+    final sub = hasLabels ? '자세한 통계는 통계페이지에서 확인해주세요.' : null;
     final icon = isGood ? Icons.check_circle : Icons.error_outline;
 
     return RectCard(
       bgColor: headerGrey,
       outlineColor: isGood ? primaryBlue : errorRed,
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Icon(icon, color: isGood ? primaryBlue : errorRed),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  softWrap: true,
+                  overflow: TextOverflow.visible,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700),
+                ),
+                if (sub != null) ...[
+                  const SizedBox(height: 4),
+                  Text(sub,
+                      style:
+                      const TextStyle(color: Colors.white70, fontSize: 12)),
+                ],
+              ],
+            ),
           ),
           if (_postureTime != null)
-            Text(DateFormat('HH:mm').format(_postureTime!), style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            Padding(
+              padding: const EdgeInsets.only(right: 4.0),
+              child: Text(
+                DateFormat('HH:mm').format(_postureTime!),
+                style:
+                const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
         ],
       ),
     );
@@ -929,7 +1134,9 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final total = good + bad;
 
     if (total == 0) {
-      return const Center(child: Text('데이터 없음', style: TextStyle(color: Colors.white70, fontSize: 12)));
+      return const Center(
+          child: Text('데이터 없음',
+              style: TextStyle(color: Colors.white70, fontSize: 12)));
     }
 
     return PieChart(
@@ -937,8 +1144,10 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         sectionsSpace: 2,
         centerSpaceRadius: 28,
         sections: [
-          PieChartSectionData(value: good.toDouble(), color: primaryBlue, title: ''),
-          PieChartSectionData(value: bad.toDouble(), color: errorRed, title: ''),
+          PieChartSectionData(
+              value: good.toDouble(), color: primaryBlue, title: ''),
+          PieChartSectionData(
+              value: bad.toDouble(), color: errorRed, title: ''),
         ],
       ),
     );
@@ -950,30 +1159,42 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return RectCard(
       bgColor: headerGrey,
       outlineColor: Colors.white.withOpacity(0.16),
-      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StatsPage())),
+      onTap: () => Navigator.push(
+          context, MaterialPageRoute(builder: (_) => const StatsPage())),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
         child: Row(
           children: [
-            Padding(padding: const EdgeInsets.only(left: 20), child: SizedBox(width: 110, height: 110, child: _miniTodayPie())),
+            Padding(
+              padding: const EdgeInsets.only(left: 20),
+              child: SizedBox(width: 110, height: 110, child: _miniTodayPie()),
+            ),
             const SizedBox(width: 28),
             Expanded(
               child: total == 0
                   ? const Align(
                 alignment: Alignment.centerRight,
-                child: Text('오늘 데이터가 아직 없어요', style: TextStyle(color: Colors.white, fontSize: 13), textAlign: TextAlign.right),
+                child: Text('오늘 데이터가 아직 없어요',
+                    style:
+                    TextStyle(color: Colors.white, fontSize: 13),
+                    textAlign: TextAlign.right),
               )
                   : Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  _legendLine(errorRed, '잘못된 자세', _formatDurationKr(_badSecToday)),
+                  _legendLine(errorRed, '잘못된 자세',
+                      _formatDurationKr(_badSecToday)),
                   const SizedBox(height: 6),
-                  _legendLine(primaryBlue, '올바른 자세', _formatDurationKr(_goodSecToday)),
+                  _legendLine(primaryBlue, '올바른 자세',
+                      _formatDurationKr(_goodSecToday)),
                   const SizedBox(height: 8),
                   _rightInfoLine('총 시간', _formatDurationKr(total)),
                   const SizedBox(height: 2),
-                  const Text('탭하면 자세한 통계로 이동', style: TextStyle(color: Colors.white, fontSize: 11), textAlign: TextAlign.right),
+                  const Text('탭하면 자세한 통계로 이동',
+                      style:
+                      TextStyle(color: Colors.white, fontSize: 11),
+                      textAlign: TextAlign.right),
                 ],
               ),
             ),
@@ -987,9 +1208,16 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        Container(width: 8, height: 8, decoration: BoxDecoration(color: dotColor, borderRadius: BorderRadius.circular(2))),
+        Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+                color: dotColor, borderRadius: BorderRadius.circular(2))),
         const SizedBox(width: 6),
-        Text('$label : $value', style: const TextStyle(color: Colors.white, fontSize: 13), textAlign: TextAlign.right, softWrap: false),
+        Text('$label : $value',
+            style: const TextStyle(color: Colors.white, fontSize: 13),
+            textAlign: TextAlign.right,
+            softWrap: false),
       ],
     );
   }
@@ -998,7 +1226,10 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        Text('$label: $value', style: const TextStyle(color: Colors.white, fontSize: 12), textAlign: TextAlign.right, softWrap: false),
+        Text('$label: $value',
+            style: const TextStyle(color: Colors.white, fontSize: 12),
+            textAlign: TextAlign.right,
+            softWrap: false),
       ],
     );
   }
@@ -1043,7 +1274,11 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         children: [
           Icon(Icons.add, size: 16, color: Colors.white70),
           SizedBox(width: 8),
-          Text('프리셋 추가', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+          Text('프리셋 추가',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -1056,7 +1291,8 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       elevated: true,
       height: 56,
       onTap: _addPreset,
-      child: const Center(child: Icon(Icons.add, size: 18, color: Colors.white70)),
+      child:
+      const Center(child: Icon(Icons.add, size: 18, color: Colors.white70)),
     );
   }
 
@@ -1068,7 +1304,12 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       height: 56,
       onTap: () => _handlePresetSelect(presetId),
       child: Center(
-        child: Text(name, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+        child: Text(name,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w600)),
       ),
     );
   }

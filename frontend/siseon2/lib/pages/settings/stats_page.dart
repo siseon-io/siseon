@@ -1,3 +1,4 @@
+// lib/pages/settings/stats_page.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -6,6 +7,7 @@ import 'package:siseon2/models/slot_data.dart';
 import 'package:siseon2/services/stats_service.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
 import 'package:siseon2/widgets/rect_card.dart';
+import 'dart:convert'; // 한글 깨짐 복구용(utf8/latin1)
 
 class StatsPage extends StatefulWidget {
   const StatsPage({super.key});
@@ -14,19 +16,36 @@ class StatsPage extends StatefulWidget {
   State<StatsPage> createState() => _StatsPageState();
 }
 
+// ──────────────────────────────────────────────────────────────
+// 한 페이지(자세) 모델
+class _BadTipPage {
+  final String name;        // summary에서 추출(각도 제거)
+  final String cue;         // 교정 팁
+  final String ergo;        // 환경 팁
+  final DateTime timeLocal; // 해당 스냅샷 endAt(로컬)
+  _BadTipPage({
+    required this.name,
+    required this.cue,
+    required this.ergo,
+    required this.timeLocal,
+  });
+}
+
+// ✅ 최신 minute 상태용
+enum _PostureStatus { good, bad, none }
+// ──────────────────────────────────────────────────────────────
+
 class _StatsPageState extends State<StatsPage> {
   // THEME
   static const Color backgroundBlack = Color(0xFF0D1117);
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color errorRed = Color(0xFFF87171);
-  static const TextStyle _label = TextStyle(
-      color: Colors.white70, fontSize: 12);
+  static const TextStyle _label = TextStyle(color: Colors.white70, fontSize: 12);
 
   // STATE
-
   List<PostureStatsMinute> _dailyMins = []; // period=daily
-  List<PostureStatsDay> _weeklyDays = []; // period=day (최근7일)
-  List<PostureStatsDay> _monthlyDays = []; // ✅ 폴백용(day 집계 12개월)
+  List<PostureStatsDay> _weeklyDays = [];   // period=day (최근7일)
+  List<PostureStatsDay> _monthlyDays = [];  // period=day (최근 12개월)
   bool _isLoading = true;
   String? _error;
 
@@ -38,10 +57,19 @@ class _StatsPageState extends State<StatsPage> {
   int _touchedMonthGood = 0;
   int _touchedMonthBad = 0;
 
+  // ✅ 최신 상태/시간
+  _PostureStatus _latestStatus = _PostureStatus.none;
+  DateTime? _latestMinuteTime;
+
+  // ✅ 최신 나쁜자세 → 페이지 뷰(아래 회색만 넘김)
+  final PageController _badPageController = PageController(initialPage: 0);
+  List<_BadTipPage> _badPages = [];
+  int _currentBadPage = 0;
+
   @override
   void initState() {
     super.initState();
-    _fetchStats();
+    _fetchStats(); // 자동 새로고침 없음(한 번만 로드)
   }
 
   Future<void> _fetchStats() async {
@@ -50,40 +78,33 @@ class _StatsPageState extends State<StatsPage> {
       _error = null;
       _touchedWeekIndex = null;
       _touchedMonth = null;
+      _badPages = [];
+      _currentBadPage = 0;
+
+      // 최신 상태 초기화
+      _latestStatus = _PostureStatus.none;
+      _latestMinuteTime = null;
     });
 
     try {
       final profile = await ProfileCacheService.loadProfile();
       final profileId = profile?['profileId'] ?? profile?['id'];
-      if (profileId == null) throw Exception('프로필을 찾을 수 없어요. 프로필을 먼저 선택해주세요.');
+      if (profileId == null) {
+        throw Exception('프로필을 찾을 수 없어요. 프로필을 먼저 선택해주세요.');
+      }
 
       final now = DateTime.now();
       final todayStart = DateTime(now.year, now.month, now.day);
-      final todayEnd = DateTime(
-          now.year,
-          now.month,
-          now.day,
-          23,
-          59,
-          59,
-          999);
-
-      // ✅ 최근 12개월 시작(해당 월 1일 00:00)
+      final todayEnd = DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
       final firstMonth = DateTime(now.year, now.month - 11, 1);
 
-      // 병렬 호출
       final results = await Future.wait([
-        // 일간 도넛: minute(daily)
         StatsService.fetchMinuteStats(profileId: profileId, period: 'daily'),
-
-        // 주간 스택바: day 집계(최근 7일)
         StatsService.fetchDayStats(
           profileId: profileId,
           from: todayStart.subtract(const Duration(days: 6)),
           to: todayEnd,
         ),
-
-        // ✅ 월간 트렌드: day 집계(최근 12개월)로 변경
         StatsService.fetchDayStats(
           profileId: profileId,
           from: firstMonth,
@@ -93,10 +114,13 @@ class _StatsPageState extends State<StatsPage> {
 
       if (!mounted) return;
       setState(() {
-        _dailyMins = results[0] as List<PostureStatsMinute>;
-        _weeklyDays = results[1] as List<PostureStatsDay>;
-        _monthlyDays = results[2] as List<PostureStatsDay>; // ✅
+        _dailyMins   = results[0] as List<PostureStatsMinute>;
+        _weeklyDays  = results[1] as List<PostureStatsDay>;
+        _monthlyDays = results[2] as List<PostureStatsDay>;
       });
+
+      _computeLatestStatus(); // ✅ 최신 minute 기준 상태 계산
+      _buildBadPages();       // ← 최신 나쁜자세를 페이지로 구성
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = '통계를 불러오지 못했어요.\n(${e.toString()})');
@@ -105,6 +129,146 @@ class _StatsPageState extends State<StatsPage> {
     }
   }
 
+  // ✅ 최신 minute 상태 계산 (validPosture / valid / badReasons.valid)
+  void _computeLatestStatus() {
+    if (_dailyMins.isEmpty) {
+      setState(() {
+        _latestStatus = _PostureStatus.none;
+        _latestMinuteTime = null;
+      });
+      return;
+    }
+
+    // 최신 endAt 가진 minute 찾기
+    PostureStatsMinute latest = _dailyMins.first;
+    for (final m in _dailyMins) {
+      if (m.endAt.isAfter(latest.endAt)) latest = m;
+    }
+
+    bool? valid = latest.validPosture;
+    try {
+      final v2 = (latest as dynamic).valid;
+      if (v2 is bool) valid = v2;
+    } catch (_) {}
+    try {
+      final br = (latest as dynamic).badReasons;
+      final v3 = (br as dynamic).valid;
+      if (v3 is bool) valid = v3;
+    } catch (_) {}
+
+    final t = latest.endAt.toLocal();
+    setState(() {
+      if (valid == true) {
+        _latestStatus = _PostureStatus.good;
+        _latestMinuteTime = t;
+      } else if (valid == false) {
+        _latestStatus = _PostureStatus.bad;
+        _latestMinuteTime = t;
+      } else {
+        _latestStatus = _PostureStatus.none;
+        _latestMinuteTime = null;
+      }
+    });
+  }
+
+  // ===== 한글 깨짐(모지박) 복구 =====
+  String _fixKoreanIfGarbled(String s) {
+    final looksGarbled = RegExp(r'(Ã.|Â.|ì.|í.|ë.|ê.|°|±|²|³|¼|½|¾)').hasMatch(s) &&
+        !RegExp(r'[가-힣]').hasMatch(s);
+    if (!looksGarbled) return s;
+    try {
+      final repaired = utf8.decode(latin1.encode(s));
+      if (RegExp(r'[가-힣]').hasMatch(repaired)) return repaired;
+      return s;
+    } catch (_) {
+      return s;
+    }
+  }
+
+  String _cleanText(String? input) {
+    if (input == null) return '';
+    final fixed = _fixKoreanIfGarbled(input);
+    return fixed.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+
+  String _normalizeKey(String s) =>
+      _cleanText(s).replaceAll(RegExp(r'\s+'), '');
+
+  // ===== 최신 나쁜자세 → 페이지 리스트 생성 =====
+  void _buildBadPages() {
+    // 1) 최신 bad 찾기
+    PostureStatsMinute? latest;
+    for (int i = _dailyMins.length - 1; i >= 0; i--) {
+      final it = _dailyMins[i];
+      bool? valid = it.validPosture;
+      try { final v2 = (it as dynamic).valid; if (v2 is bool) valid = v2; } catch (_) {}
+      try { final br = (it as dynamic).badReasons; final v3 = (br as dynamic).valid; if (v3 is bool) valid = v3; } catch (_) {}
+      if (valid == false) { latest = it; break; }
+    }
+    if (latest == null) {
+      setState(() { _badPages = []; });
+      return;
+    }
+
+    final timeLocal = latest.endAt.toLocal();
+
+    // 2) summary에서 자세 이름만(각도 제거) 추출
+    final names = <String>[];
+    try {
+      final br = (latest as dynamic).badReasons;
+      final sum = _cleanText((br as dynamic).summary?.toString());
+      if (sum.isNotEmpty) {
+        names.addAll(
+          sum.split(',').map((e) => e.split('(').first).map(_cleanText).where((e) => e.isNotEmpty),
+        );
+      }
+    } catch (_) {}
+    // fallback: 아무것도 없으면 reasons의 label 사용
+    if (names.isEmpty) {
+      try {
+        final rs = ((latest as dynamic).badReasons as dynamic).reasons;
+        if (rs is Iterable) {
+          for (final r in rs) {
+            final lbl = _cleanText((r as dynamic).label?.toString());
+            if (lbl.isNotEmpty) names.add(lbl);
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3) reasons를 label 기준으로 맵 구성(팁 찾기)
+    final tipByLabel = <String, Map<String, String>>{};
+    try {
+      final rs = ((latest as dynamic).badReasons as dynamic).reasons;
+      if (rs is Iterable) {
+        for (final r in rs) {
+          final lbl  = _cleanText((r as dynamic).label?.toString());
+          final cue  = _cleanText((r as dynamic).cue?.toString());
+          final ergo = _cleanText((r as dynamic).ergonomics?.toString());
+          if (lbl.isEmpty) continue;
+          tipByLabel[_normalizeKey(lbl)] = {'cue': cue, 'ergo': ergo};
+        }
+      }
+    } catch (_) {}
+
+    // 4) 페이지 리스트 만들기 (summary 순서 그대로)
+    final pages = <_BadTipPage>[];
+    for (final nm in names) {
+      final key = _normalizeKey(nm);
+      final tip = tipByLabel[key] ?? const {'cue': '', 'ergo': ''};
+      pages.add(_BadTipPage(
+        name: nm,
+        cue: tip['cue'] ?? '',
+        ergo: tip['ergo'] ?? '',
+        timeLocal: timeLocal,
+      ));
+    }
+
+    setState(() {
+      _badPages = pages;
+      _currentBadPage = 0;
+    });
+  }
 
   // HELPERS
   String _formatDuration(int seconds) {
@@ -114,6 +278,8 @@ class _StatsPageState extends State<StatsPage> {
     if (h > 0) return '${h}시간 ${m}분';
     return '${m}분';
   }
+
+  String _formatHM(DateTime d) => DateFormat('HH:mm').format(d);
 
   DateTime _dateForWeekIndex(int index) {
     final now = DateTime.now();
@@ -166,14 +332,12 @@ class _StatsPageState extends State<StatsPage> {
               children: [
                 const Icon(Icons.error_outline, color: errorRed, size: 36),
                 const SizedBox(height: 12),
-                Text(_error!, style: const TextStyle(color: Colors.white70),
-                    textAlign: TextAlign.center),
+                Text(_error!, style: const TextStyle(color: Colors.white70), textAlign: TextAlign.center),
                 const SizedBox(height: 16),
                 FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: primaryBlue),
                   onPressed: _fetchStats,
-                  child: const Text(
-                      '다시 시도', style: TextStyle(color: Colors.white)),
+                  child: const Text('다시 시도', style: TextStyle(color: Colors.white)),
                 ),
               ],
             ),
@@ -188,11 +352,133 @@ class _StatsPageState extends State<StatsPage> {
       body: RefreshIndicator(
         color: Colors.white,
         backgroundColor: primaryBlue,
-        onRefresh: _fetchStats,
+        onRefresh: _fetchStats, // 🔄 사용자가 당겨서 새로고침할 때만
         child: SafeArea(
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              // ✅ 최신 minute이 "좋음"이면 파란 배너
+              if (_latestStatus == _PostureStatus.good)
+                RectCard(
+                  outlineColor: primaryBlue,
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.check_circle, color: primaryBlue),
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          '올바른 자세입니다. 유지해주세요!',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      if (_latestMinuteTime != null)
+                        Text(_formatHM(_latestMinuteTime!),
+                            style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    ],
+                  ),
+                ),
+              if (_latestStatus == _PostureStatus.good) const SizedBox(height: 20),
+
+              // ✅ 최신 minute이 "좋음"이 아닐 때만 나쁜자세 카드 노출
+              if (_latestStatus != _PostureStatus.good && _badPages.isNotEmpty)
+                RectCard(
+                  outlineColor: errorRed,
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ── 헤더(고정)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.error_outline, color: errorRed),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${_badPages.map((e) => e.name).join(', ')}이(가) 감지되었습니다.',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          Text(_formatHM(_badPages.first.timeLocal),
+                              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+
+                      // ── 아래 밝은 회색 블록만 PageView
+                      SizedBox(
+                        height: 118,
+                        child: PageView.builder(
+                          controller: _badPageController,
+                          itemCount: _badPages.length,
+                          onPageChanged: (i) => setState(() => _currentBadPage = i),
+                          itemBuilder: (_, i) {
+                            final p = _badPages[i];
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 2),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.08),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(p.name,
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700)),
+                                  if (p.cue.isNotEmpty) ...[
+                                    const SizedBox(height: 4),
+                                    Text('교정 팁: ${p.cue}',
+                                        style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                                  ],
+                                  if (p.ergo.isNotEmpty) ...[
+                                    const SizedBox(height: 2),
+                                    Text('환경 팁: ${p.ergo}',
+                                        style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                                  ],
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+
+                      // 점 인디케이터
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(_badPages.length, (i) {
+                          final active = i == _currentBadPage;
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            width: active ? 8 : 6,
+                            height: active ? 8 : 6,
+                            decoration: BoxDecoration(
+                              color: active ? primaryBlue : Colors.white24,
+                              shape: BoxShape.circle,
+                            ),
+                          );
+                        }),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_latestStatus != _PostureStatus.good && _badPages.isNotEmpty)
+                const SizedBox(height: 20),
+
               // 일간 도넛
               RectCard(
                 elevated: true,
@@ -202,10 +488,12 @@ class _StatsPageState extends State<StatsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
-                      const Expanded(child: Text('일간 자세 비율', style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600))),
+                      const Expanded(
+                        child: Text(
+                          '일간 자세 비율',
+                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                      ),
                       _legendMini()
                     ]),
                     const SizedBox(height: 12),
@@ -224,10 +512,12 @@ class _StatsPageState extends State<StatsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(children: [
-                      const Expanded(child: Text('주간 자세 통계', style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600))),
+                      const Expanded(
+                        child: Text(
+                          '주간 자세 통계',
+                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                      ),
                       _legendMini()
                     ]),
                     const SizedBox(height: 12),
@@ -247,10 +537,11 @@ class _StatsPageState extends State<StatsPage> {
                   children: [
                     Row(children: [
                       const Expanded(
-                          child: Text('연간 월별 자세 추이', style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600))),
+                        child: Text(
+                          '연간 월별 자세 추이',
+                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                      ),
                       _legendMini()
                     ]),
                     const SizedBox(height: 12),
@@ -314,15 +605,13 @@ class _StatsPageState extends State<StatsPage> {
             value: totalGood.toDouble(),
             color: primaryBlue,
             title: '${_formatDuration(totalGood)}\n($goodPct%)',
-            titleStyle: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
           ),
           PieChartSectionData(
             value: totalBad.toDouble(),
             color: errorRed,
             title: '${_formatDuration(totalBad)}\n($badPct%)',
-            titleStyle: const TextStyle(
-                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
           ),
         ],
       ),
@@ -334,21 +623,17 @@ class _StatsPageState extends State<StatsPage> {
       return const Center(child: Text('데이터 없음', style: _label));
     }
 
-    // 일(0)~토(6) 누적(초) — day 집계의 분 단위 “개수”를 초로 환산(*60)
     final dayWise = List.generate(7, (_) => {'good': 0, 'bad': 0});
     for (final d in _weeklyDays) {
       final w = d.statDate.weekday % 7; // Mon=1..Sun=7 -> 1..6,0
       dayWise[w]['good'] = dayWise[w]['good']! + d.goodCount * 60;
-      dayWise[w]['bad'] = dayWise[w]['bad']! + d.badCount * 60;
+      dayWise[w]['bad']  = dayWise[w]['bad']!  + d.badCount * 60;
     }
 
-    final hasData = dayWise.any((e) =>
-    (e['good'] ?? 0) > 0 || (e['bad'] ?? 0) > 0);
+    final hasData = dayWise.any((e) => (e['good'] ?? 0) > 0 || (e['bad'] ?? 0) > 0);
     if (!hasData) return const Center(child: Text('데이터 없음', style: _label));
 
-    final todayIdx = DateTime
-        .now()
-        .weekday % 7; // 0=일..6=토
+    final todayIdx = DateTime.now().weekday % 7; // 0=일..6=토
     final shift = (todayIdx + 1) % 7;
     const baseLabels = ['일', '월', '화', '수', '목', '금', '토'];
     final rotatedLabels = _rotateLeft(baseLabels, shift);
@@ -381,12 +666,9 @@ class _StatsPageState extends State<StatsPage> {
                         Text(rotatedLabels[value.toInt()], style: _label),
                   ),
                 ),
-                leftTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false)),
-                topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false)),
+                leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
               ),
               barTouchData: BarTouchData(
                 enabled: true,
@@ -407,12 +689,11 @@ class _StatsPageState extends State<StatsPage> {
                     });
                   }
                 },
-                touchTooltipData: BarTouchTooltipData(
-                    getTooltipItem: (_, __, ___, ____) => null),
+                touchTooltipData: BarTouchTooltipData(getTooltipItem: (_, __, ___, ____) => null),
               ),
               barGroups: List.generate(7, (i) {
                 final goodH = (rotatedDayWise[i]['good']! / 3600).toDouble();
-                final badH = (rotatedDayWise[i]['bad']! / 3600).toDouble();
+                final badH  = (rotatedDayWise[i]['bad']!  / 3600).toDouble();
                 final sum = goodH + badH;
                 return BarChartGroupData(x: i, barRods: [
                   BarChartRodData(
@@ -434,8 +715,7 @@ class _StatsPageState extends State<StatsPage> {
               left: leftFor(_touchedWeekIndex!),
               child: Container(
                 width: tooltipWidth,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.85),
                   borderRadius: BorderRadius.circular(12),
@@ -445,12 +725,9 @@ class _StatsPageState extends State<StatsPage> {
                   children: [
                     Builder(builder: (_) {
                       final actualIdx = (_touchedWeekIndex! + shift) % 7;
-                      final dateText =
-                      DateFormat('M월 d일').format(_dateForWeekIndex(actualIdx));
+                      final dateText = DateFormat('M월 d일').format(_dateForWeekIndex(actualIdx));
                       return Text('$dateText 통계',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold));
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold));
                     }),
                     const SizedBox(height: 6),
                     Row(children: [
@@ -483,39 +760,33 @@ class _StatsPageState extends State<StatsPage> {
       return const Center(child: Text('데이터 없음', style: _label));
     }
 
-    // 최근 12개월 Year-Month 버킷 고정 (왼→오: 오래된→현재달)
     final now = DateTime.now();
-    final months = List.generate(
-        12, (i) => DateTime(now.year, now.month - 11 + i, 1));
+    final months = List.generate(12, (i) => DateTime(now.year, now.month - 11 + i, 1));
     final labels = months.map((d) => '${d.month}월').toList();
 
-    // 월별 누적(초) — day 집계의 분 단위 "개수"를 초로 환산(*60)
     final List<int> goodSec = List.filled(12, 0);
-    final List<int> badSec = List.filled(12, 0);
+    final List<int> badSec  = List.filled(12, 0);
 
     for (final d in _monthlyDays) {
       final ym = DateTime(d.statDate.year, d.statDate.month, 1);
-      final idx = months.indexWhere((m) =>
-      m.year == ym.year && m.month == ym.month);
+      final idx = months.indexWhere((m) => m.year == ym.year && m.month == ym.month);
       if (idx == -1) continue;
 
       goodSec[idx] += d.goodCount * 60;
-      badSec[idx] += d.badCount * 60;
+      badSec[idx]  += d.badCount * 60;
     }
 
     final hasGood = goodSec.any((v) => v > 0);
-    final hasBad = badSec.any((v) => v > 0);
+    final hasBad  = badSec.any((v) => v > 0);
     if (!hasGood && !hasBad) {
       return const Center(child: Text('데이터 없음', style: _label));
     }
 
-    // 0값은 점 생략
     final goodSpots = <FlSpot>[];
-    final badSpots = <FlSpot>[];
+    final badSpots  = <FlSpot>[];
     for (int i = 0; i < 12; i++) {
-      if (goodSec[i] > 0) goodSpots.add(
-          FlSpot(i.toDouble(), goodSec[i] / 3600.0));
-      if (badSec[i] > 0) badSpots.add(FlSpot(i.toDouble(), badSec[i] / 3600.0));
+      if (goodSec[i] > 0) goodSpots.add(FlSpot(i.toDouble(), goodSec[i] / 3600.0));
+      if (badSec[i]  > 0) badSpots.add(FlSpot(i.toDouble(), badSec[i] / 3600.0));
     }
 
     final List<LineChartBarData> bars = [];
@@ -562,20 +833,17 @@ class _StatsPageState extends State<StatsPage> {
               titlesData: FlTitlesData(
                 bottomTitles: AxisTitles(
                   sideTitles: SideTitles(
-                    showTitles: true, interval: 1,
+                    showTitles: true,
+                    interval: 1,
                     getTitlesWidget: (v, _) {
                       final i = v.toInt().clamp(0, 11);
-                      return Text(labels[i], style: _label.copyWith(
-                          fontSize: 10));
+                      return Text(labels[i], style: _label.copyWith(fontSize: 10));
                     },
                   ),
                 ),
-                leftTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false)),
-                topTitles: const AxisTitles(
-                    sideTitles: SideTitles(showTitles: false)),
+                leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
               ),
               lineTouchData: LineTouchData(
                 enabled: true,
@@ -584,8 +852,7 @@ class _StatsPageState extends State<StatsPage> {
                   if (event is FlTapUpEvent &&
                       response?.lineBarSpots != null &&
                       response!.lineBarSpots!.isNotEmpty) {
-                    final idx = response.lineBarSpots!.first.x.toInt().clamp(
-                        0, 11);
+                    final idx = response.lineBarSpots!.first.x.toInt().clamp(0, 11);
                     setState(() {
                       if (_touchedMonth == idx) {
                         _touchedMonth = null;
@@ -599,8 +866,7 @@ class _StatsPageState extends State<StatsPage> {
                     });
                   }
                 },
-                touchTooltipData: LineTouchTooltipData(
-                    getTooltipItems: (_) => []),
+                touchTooltipData: LineTouchTooltipData(getTooltipItems: (_) => []),
               ),
               lineBarsData: bars,
             ),
@@ -611,8 +877,7 @@ class _StatsPageState extends State<StatsPage> {
               left: leftForIndex(_touchedMonth!),
               child: Container(
                 width: tooltipWidth,
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: Colors.black.withOpacity(0.85),
                   borderRadius: BorderRadius.circular(12),
@@ -621,8 +886,7 @@ class _StatsPageState extends State<StatsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('${labels[_touchedMonth!]} 통계',
-                        style: const TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.bold)),
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 6),
                     Row(children: [
                       const Icon(Icons.square, color: errorRed, size: 10),
@@ -643,5 +907,11 @@ class _StatsPageState extends State<StatsPage> {
         ],
       );
     });
+  }
+
+  @override
+  void dispose() {
+    _badPageController.dispose(); // ✅ PageController 정리
+    super.dispose();
   }
 }
