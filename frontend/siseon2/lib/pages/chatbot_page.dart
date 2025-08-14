@@ -1,9 +1,10 @@
 // lib/pages/chat/chatbot_page.dart
-import 'dart:async'; // ✅ 점 애니메이션용
+import 'dart:async'; // ✅ 점 애니메이션/폴링 타이머
 import 'dart:convert'; // ✅ AssetManifest 파싱
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // ✅ 진행중 상태 저장
 
 import 'package:siseon2/services/chat_api.dart';
 import 'package:siseon2/models/chat_models.dart';
@@ -39,13 +40,18 @@ class _ChatbotPageState extends State<ChatbotPage> {
 
   final ChatApi _api = ChatApi();
   bool _loading = true;
-  bool _sending = false;
+  bool _sending = false; // ✅ 답변 올 때까지 전송 금지
 
   // 타이핑 인디케이터 상태
   bool _assistantTyping = false;
   Timer? _typingTimer;
   int _typingDots = 1; // 1~3 사이에서 왕복
   int _typingDir = 1;  // 1이면 증가, -1이면 감소
+
+  // ✅ 자동 새로고침(폴링)용
+  Timer? _pendingPoll;      // 답변 도착 감시 타이머
+  DateTime? _pendingAt;     // 진행중 메시지 보낸 시각
+  String? _pendingText;     // 진행중 메시지 텍스트
 
   ImageProvider? _userAvatar;
   ImageProvider? _assistantAvatarImg; // ✅ SEONY 프로필 이미지
@@ -67,11 +73,12 @@ class _ChatbotPageState extends State<ChatbotPage> {
     super.initState();
     _loadAssistantAvatar(); // ✅ SEONY 아바타 로드
     _loadUserAvatar();
-    _loadHistory();
+    _loadHistory(); // 서버 이력
   }
 
   @override
   void dispose() {
+    _pendingPoll?.cancel();   // ✅ 폴링 정리
     _typingTimer?.cancel();
     _controller.dispose();
     _scroll.dispose();
@@ -136,6 +143,10 @@ class _ChatbotPageState extends State<ChatbotPage> {
         _messages..clear()..addAll(hist);
         _loading = false;
       });
+
+      // ✅ 진행중(서버에 아직 반영 전)인 로컬 보낸메시지 복원
+      await _restorePendingIfAny();
+
       _jumpToNewest();
     } catch (e) {
       setState(() => _loading = false);
@@ -144,7 +155,86 @@ class _ChatbotPageState extends State<ChatbotPage> {
           SnackBar(content: Text('이전 대화 불러오기 실패: $e')),
         );
       }
+      // 실패해도 진행중 복원은 시도
+      await _restorePendingIfAny();
     }
+  }
+
+  // ── 진행중 메시지 로컬복원 ──────────────────────────────────────────────
+  Future<void> _restorePendingIfAny() async {
+    final (pendingText, pendingAtIso, wasSending) =
+    await _LocalChatState.load(widget.profileId);
+
+    if (pendingText != null && pendingAtIso != null) {
+      final pendingAt = DateTime.tryParse(pendingAtIso);
+      // 중복 방지: 같은 내용+시간(±2초) 있으면 추가 안 함
+      final already = _messages.any((m) =>
+      m.role == 'user' &&
+          m.content == pendingText &&
+          pendingAt != null &&
+          (m.createdAt.difference(pendingAt).inSeconds).abs() <= 2);
+
+      if (!already) {
+        setState(() {
+          _messages.add(ChatMessage(
+            role: 'user',
+            content: pendingText,
+            createdAt: pendingAt ?? nowKstLocal(),
+          ));
+        });
+      }
+    }
+
+    if (wasSending == true) {
+      // 여전히 답변 대기 중 → 타이핑 인디케이터 재개 + 전송 막기 + ✅ 폴링 시작
+      if (!_assistantTyping) _startTyping();
+      if (!_sending) setState(() => _sending = true);
+
+      _pendingAt = DateTime.tryParse(pendingAtIso!); // 기준 시각 저장
+      _pendingText = pendingText;                    // 기준 텍스트 저장
+      _startPendingWatcher();                        // ✅ 자동 새로고침 시작
+    }
+  }
+
+  // ── 자동 새로고침(2초 간격 폴링) — 진행중이면 서버 이력 재조회 ───────────
+  void _startPendingWatcher() {
+    _pendingPoll?.cancel();
+    if (_pendingAt == null) return;
+
+    _pendingPoll = Timer.periodic(const Duration(seconds: 2), (_) async {
+      if (!mounted || !_sending) { _pendingPoll?.cancel(); return; }
+      try {
+        final hist = await _api.fetchHistory(profileId: widget.profileId);
+
+        // 보낸 시각(±2초 버퍼) 이후에 assistant 메시지가 생겼는지 확인
+        if (_hasAssistantAfterPending(hist)) {
+          setState(() {
+            _messages
+              ..clear()
+              ..addAll(hist);      // 최신 히스토리로 교체(답변 포함)
+            _sending = false;      // 입력 잠금 해제
+          });
+          _stopTyping();           // 인디케이터 종료
+          await _LocalChatState.clear(widget.profileId);
+          _pendingPoll?.cancel();
+          _pendingAt = null;
+          _pendingText = null;
+          _jumpToNewest();
+        }
+      } catch (_) {
+        // 네트워크 일시 오류면 다음 틱에서 재시도
+      }
+    });
+  }
+
+  bool _hasAssistantAfterPending(List<ChatMessage> hist) {
+    if (_pendingAt == null) return false;
+    final fromT = _pendingAt!.subtract(const Duration(seconds: 2)); // 버퍼
+    return hist.any((m) =>
+    m.role == 'assistant' &&
+        m.content.trim().isNotEmpty &&
+        !m.createdAt.isBefore(fromT)
+    );
   }
 
   // ── 타이핑 인디케이터 제어 ─────────────────────────────────────────────
@@ -182,31 +272,48 @@ class _ChatbotPageState extends State<ChatbotPage> {
   // SEND(일반 질문)
   Future<void> _onSend() async {
     final text = _controller.text.trim();
-    if (text.isEmpty || _sending) return;
+    if (text.isEmpty || _sending) return; // ✅ 중복 전송 방지
 
     final now = nowKstLocal();
     setState(() {
       _messages.add(ChatMessage(role: 'user', content: text, createdAt: now));
-      _sending = true;
+      _sending = true; // ✅ 잠금
     });
     _controller.clear();
     _jumpToNewest();
 
     _startTyping(); // ✅ 애니메이션 시작
 
+    // ✅ 진행중 기준 저장 + 로컬 저장 + 폴링 시작
+    _pendingAt = now;
+    _pendingText = text;
+    await _LocalChatState.save(widget.profileId, text, now);
+    _startPendingWatcher();
+
     try {
       final res = await _api.sendQuestion(profileId: widget.profileId, question: text);
       final botText = (res.summary.isEmpty) ? '(빈 응답)' : res.summary;
       _addBotBubble(botText, createdAt: res.createdAt);
+
+      // ✅ 응답 도착 → 진행중 해제
+      await _LocalChatState.clear(widget.profileId);
+      _pendingPoll?.cancel();
+      _pendingAt = null;
+      _pendingText = null;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('전송 실패: $e')),
         );
       }
+      // 실패 시 진행중 상태 클리어(중복 폭주 방지)
+      await _LocalChatState.clear(widget.profileId);
+      _pendingPoll?.cancel();
+      _pendingAt = null;
+      _pendingText = null;
     } finally {
       _stopTyping(); // ✅ 애니메이션 종료
-      if (mounted) setState(() => _sending = false);
+      if (mounted) setState(() => _sending = false); // ✅ 잠금 해제
     }
   }
 
@@ -236,9 +343,8 @@ class _ChatbotPageState extends State<ChatbotPage> {
     });
   }
 
-  // FAQ 바텀시트 열기 → 질문/답변 둘 다 바로 추가
+  // FAQ 바텀시트 열기 → 질문/답변 둘 다 바로 추가 (진행중 상태 아님)
   Future<void> _openFaqSheet() async {
-    // ✅ 이름 있는 레코드로 반환
     final qa = await showModalBottomSheet<({String q, String a})?>(
       context: context,
       isScrollControlled: true,
@@ -247,8 +353,8 @@ class _ChatbotPageState extends State<ChatbotPage> {
     );
 
     if (qa != null) {
-      _addUserBubble('[FAQ] ${qa.q}'); // 질문 즉시 표시
-      _addBotBubble(qa.a);             // 답변 즉시 표시
+      _addUserBubble('[FAQ] ${qa.q}');
+      _addBotBubble(qa.a);
     }
   }
 
@@ -307,7 +413,7 @@ class _ChatbotPageState extends State<ChatbotPage> {
                           Padding(padding: const EdgeInsets.only(top: 2), child: _userAvatarWidget()),
                         ]
                             : [
-                          // ✅ 챗봇 아바타만 살짝 위로 올림 (-4px)
+                          // ✅ 챗봇 아바타만 살짝 위로 올림 (-6px)
                           Transform.translate(
                             offset: const Offset(0, -6),
                             child: _assistantAvatar(),
@@ -335,9 +441,10 @@ class _ChatbotPageState extends State<ChatbotPage> {
                   Expanded(
                     child: TextField(
                       controller: _controller,
+                      enabled: !_sending, // ✅ 답변대기 중 입력 금지
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
-                        hintText: 'SEONY에게 물어보기…',
+                        hintText: _sending ? '답변을 기다리는 중…' : 'SEONY에게 물어보기…',
                         hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
                         fillColor: inputBg,
                         filled: true,
@@ -348,7 +455,10 @@ class _ChatbotPageState extends State<ChatbotPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  IconButton(onPressed: _sending ? null : _onSend, icon: const Icon(Icons.send_rounded, color: Colors.white)),
+                  IconButton(
+                    onPressed: _sending ? null : _onSend, // ✅ 대기중이면 버튼 비활성
+                    icon: const Icon(Icons.send_rounded, color: Colors.white),
+                  ),
                 ],
               ),
             ),
@@ -389,7 +499,7 @@ class _ChatbotPageState extends State<ChatbotPage> {
         alignment: Alignment.center,
         child: const Text(
           'S',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 20), // 글자도 키움
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 20),
         ),
       );
     }
@@ -577,7 +687,6 @@ class _FaqSheetState extends State<_FaqSheet> {
                       try {
                         final qa = await FaqService.answerFromFaq(faqId: f.id, profileId: widget.profileId);
                         if (!mounted) return;
-                        // ✅ 질문/답변 둘 다 반환 (이름 있는 레코드)
                         Navigator.pop(context, (q: f.question, a: qa.answer));
                       } catch (e) {
                         if (!mounted) return;
@@ -592,5 +701,40 @@ class _FaqSheetState extends State<_FaqSheet> {
         ),
       ),
     );
+  }
+}
+
+/// ─────────────────────────────────────────────────────────────────────────────
+/// 진행중(응답 대기) 메시지 로컬 저장 유틸
+///   - 키: 프로필별로 분리
+///   - 저장: text + createdAt + sending=true
+///   - 복원: text/createdAt/sending
+///   - 클리어: 모두 삭제
+/// ─────────────────────────────────────────────────────────────────────────────
+class _LocalChatState {
+  static String _kText(int pid) => 'chat_pending_text_$pid';
+  static String _kAt(int pid) => 'chat_pending_at_$pid';
+  static String _kSending(int pid) => 'chat_sending_$pid';
+
+  static Future<void> save(int profileId, String text, DateTime createdAt) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kText(profileId), text);
+    await p.setString(_kAt(profileId), createdAt.toIso8601String());
+    await p.setBool(_kSending(profileId), true);
+  }
+
+  static Future<(String?, String?, bool?)> load(int profileId) async {
+    final p = await SharedPreferences.getInstance();
+    final text = p.getString(_kText(profileId));
+    final at = p.getString(_kAt(profileId));
+    final sending = p.getBool(_kSending(profileId));
+    return (text, at, sending);
+  }
+
+  static Future<void> clear(int profileId) async {
+    final p = await SharedPreferences.getInstance();
+    await p.remove(_kText(profileId));
+    await p.remove(_kAt(profileId));
+    await p.remove(_kSending(profileId));
   }
 }

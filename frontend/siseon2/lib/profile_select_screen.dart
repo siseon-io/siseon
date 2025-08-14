@@ -20,7 +20,9 @@ class AppColors {
 }
 
 class ProfileSelectScreen extends StatefulWidget {
-  const ProfileSelectScreen({super.key});
+  // ★ 뒤로가기 정책: 로그인 플로우=false, 설정 진입=true
+  final bool allowBack;
+  const ProfileSelectScreen({super.key, this.allowBack = false});
 
   @override
   State<ProfileSelectScreen> createState() => _ProfileSelectScreenState();
@@ -146,10 +148,11 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
           image: image,
           startDelayMs: heroMs,          // 히어로 끝나고 내부 애니 시작
           pauseAfterExpandMs: 500,       // ✅ 확대 후 0.5초 대기
-          onDone: () async {
-            if (!context.mounted) return;
+          // ★ onDone은 AvatarMorphScreen의 context로 실행
+          onDone: (ctx) async {
+            if (!ctx.mounted) return;
             await Navigator.pushReplacement(
-              context,
+              ctx,
               _fadeScaleRoute(const RootScreen(), 600),
             );
           },
@@ -186,71 +189,90 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
         (list[_selectedIndex!]['isAddButton'] == true);
     final bool dimOthers = _selectedIndex != null && !selectedIsAdd;
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('프로필 선택'),
+    return WillPopScope(
+      // ★ 애니/전환 중 뒤로가기 차단 + 로그인 플로우에서는 종료 방지
+      onWillPop: () async {
+        if (_isPushing) return false; // 전환 중 크래시 방지
+        if (widget.allowBack) {
+          return true; // 설정에서 진입: 정상 뒤로가기
+        } else {
+          // 로그인 직후: 실수 종료 방지
+          HapticFeedback.lightImpact();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('프로필을 선택해 주세요.')),
+            );
+          }
+          return false;
+        }
+      },
+      child: Scaffold(
         backgroundColor: AppColors.background,
-        foregroundColor: AppColors.text,
-        elevation: 0,
-        centerTitle: true,
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.white))
-          : Padding(
-        padding: const EdgeInsets.all(20),
-        child: GridView.builder(
-          itemCount: list.length,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 24,
-            mainAxisSpacing: 24,
-            childAspectRatio: 0.85,
-          ),
-          itemBuilder: (context, i) {
-            final p = list[i];
-            final bool add = p['isAddButton'] == true;
-            final bool sel = _selectedIndex == i;
+        appBar: AppBar(
+          title: const Text('프로필 선택'),
+          backgroundColor: AppColors.background,
+          foregroundColor: AppColors.text,
+          elevation: 0,
+          centerTitle: true,
+          automaticallyImplyLeading: widget.allowBack, // ★ 뒤로가기 아이콘 표시 정책
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator(color: Colors.white))
+            : Padding(
+          padding: const EdgeInsets.all(20),
+          child: GridView.builder(
+            itemCount: list.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 24,
+              mainAxisSpacing: 24,
+              childAspectRatio: 0.85,
+            ),
+            itemBuilder: (context, i) {
+              final p = list[i];
+              final bool add = p['isAddButton'] == true;
+              final bool sel = _selectedIndex == i;
 
-            final double scale =
-            sel ? _scaleSelected : (dimOthers ? _scaleOthers : 1.0);
-            final double opacity =
-            sel ? 1.0 : (dimOthers ? _fadeOthers : 1.0);
+              final double scale =
+              sel ? _scaleSelected : (dimOthers ? _scaleOthers : 1.0);
+              final double opacity =
+              sel ? 1.0 : (dimOthers ? _fadeOthers : 1.0);
 
-            final String tag = 'avatar_${p['id']}';
-            final image = _provider(p['imageUrl']);
+              final String tag = 'avatar_${p['id']}';
+              final image = _provider(p['imageUrl']);
 
-            return GestureDetector(
-              onTap: () async {
-                if (_isPushing) return;
-                HapticFeedback.selectionClick();
+              return GestureDetector(
+                onTap: () async {
+                  if (_isPushing) return;
+                  HapticFeedback.selectionClick();
 
-                if (add) {
-                  setState(() => _selectedIndex = null); // 🔑 Add 탭 시 선택 해제
-                  return _onAddPressed();
-                }
+                  if (add) {
+                    setState(() => _selectedIndex = null); // 🔑 Add 탭 시 선택 해제
+                    return _onAddPressed();
+                  }
 
-                setState(() => _selectedIndex = i);
-                await _onProfileSelected(p);
-              },
-              child: AnimatedScale(
-                scale: scale.toDouble(),
-                duration: _cardAnim,
-                curve: Curves.easeOutCubic,
-                child: AnimatedOpacity(
-                  opacity: opacity,
+                  setState(() => _selectedIndex = i);
+                  await _onProfileSelected(p);
+                },
+                child: AnimatedScale(
+                  scale: scale.toDouble(),
                   duration: _cardAnim,
                   curve: Curves.easeOutCubic,
-                  child: _ProfileCard(
-                    name: add ? '프로필 추가' : (p['name'] ?? ''),
-                    heroTag: tag,
-                    image: image,
-                    showAdd: add,
+                  child: AnimatedOpacity(
+                    opacity: opacity,
+                    duration: _cardAnim,
+                    curve: Curves.easeOutCubic,
+                    child: _ProfileCard(
+                      name: add ? '프로필 추가' : (p['name'] ?? ''),
+                      heroTag: tag,
+                      image: image,
+                      showAdd: add,
+                    ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -261,7 +283,8 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
 class AvatarMorphScreen extends StatefulWidget {
   final String heroTag;
   final ImageProvider? image;
-  final VoidCallback onDone;
+  // ★ 자신의 context를 받도록 변경
+  final Future<void> Function(BuildContext ctx) onDone;
   final int startDelayMs;       // 히어로 끝나고 시작 딜레이
   final int pauseAfterExpandMs; // ✅ 확대 후 대기 시간
 
@@ -291,8 +314,11 @@ class _AvatarMorphScreenState extends State<AvatarMorphScreen>
     _c = AnimationController(
       vsync: this,
       duration: Duration(milliseconds: totalMs),
-    )..addStatusListener((s) {
-      if (s == AnimationStatus.completed) widget.onDone();
+    )..addStatusListener((s) async {
+      if (s == AnimationStatus.completed && mounted) {
+        // ★ 자기 context로 내비 (팝된 context 접근 방지)
+        await widget.onDone(context);
+      }
     });
 
     // 히어로 이동이 끝난 뒤에 모핑 시작
@@ -313,78 +339,82 @@ class _AvatarMorphScreenState extends State<AvatarMorphScreen>
     final expandMs = (_baseMorphMs * _split).round();     // 확대 구간 시간
     final shrinkMs = _baseMorphMs - expandMs;             // 축소 구간 시간
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: SafeArea(
-        minimum: const EdgeInsets.all(12),
-        child: AnimatedBuilder(
-          animation: _c,
-          builder: (_, __) {
-            // 컨트롤러 진행(0..1) → 실제 ms → 구간별 진행률로 변환
-            final elapsedMs = (_c.value * totalMs);
-            double morphT; // 0..1, 0~0.4는 확대, 0.4 고정(대기), 이후 1.0까지 축소
+    return WillPopScope(
+      // ★ 애니 중 뒤로가기 차단 (중간 팝으로 인한 크래시 방지)
+      onWillPop: () async => false,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          minimum: const EdgeInsets.all(12),
+          child: AnimatedBuilder(
+            animation: _c,
+            builder: (_, __) {
+              // 컨트롤러 진행(0..1) → 실제 ms → 구간별 진행률로 변환
+              final elapsedMs = (_c.value * totalMs);
+              double morphT; // 0..1, 0~0.4는 확대, 0.4 고정(대기), 이후 1.0까지 축소
 
-            if (elapsedMs <= expandMs) {
-              // 확대(0 → 0.4)
-              morphT = _split * (elapsedMs / expandMs);
-            } else if (elapsedMs <= expandMs + widget.pauseAfterExpandMs) {
-              // ✅ 대기(0.4 고정)
-              morphT = _split;
-            } else {
-              // 축소(0.4 → 1.0)
-              final afterPause = elapsedMs - expandMs - widget.pauseAfterExpandMs;
-              morphT = _split + (1 - _split) * (afterPause / shrinkMs);
-            }
+              if (elapsedMs <= expandMs) {
+                // 확대(0 → 0.4)
+                morphT = _split * (elapsedMs / expandMs);
+              } else if (elapsedMs <= expandMs + widget.pauseAfterExpandMs) {
+                // ✅ 대기(0.4 고정)
+                morphT = _split;
+              } else {
+                // 축소(0.4 → 1.0)
+                final afterPause = elapsedMs - expandMs - widget.pauseAfterExpandMs;
+                morphT = _split + (1 - _split) * (afterPause / shrinkMs);
+              }
 
-            // 사이즈/모서리/위치 계산
-            double box = _segmentLerp(72, 180, 180, 44, morphT, split: _split);
-            final double r = morphT < _split
-                ? 18
-                : _lerp(18, box / 2, (morphT - _split) / (1 - _split));
-            Alignment align = morphT < _split
-                ? Alignment.center
-                : Alignment.lerp(
-              Alignment.center,
-              Alignment.topLeft,
-              (morphT - _split) / (1 - _split),
-            )!;
-            final double bgOpacity = _lerp(0.65, 0.35, morphT);
+              // 사이즈/모서리/위치 계산
+              double box = _segmentLerp(72, 180, 180, 44, morphT, split: _split);
+              final double r = morphT < _split
+                  ? 18
+                  : _lerp(18, box / 2, (morphT - _split) / (1 - _split));
+              Alignment align = morphT < _split
+                  ? Alignment.center
+                  : Alignment.lerp(
+                Alignment.center,
+                Alignment.topLeft,
+                (morphT - _split) / (1 - _split),
+              )!;
+              final double bgOpacity = _lerp(0.65, 0.35, morphT);
 
-            return Stack(
-              children: [
-                // 어두운 배경 + 살짝 블러 효과
-                Positioned.fill(
-                  child: Opacity(
-                    opacity: bgOpacity,
-                    child: BackdropFilter(
-                      filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
-                      child: Container(color: Colors.black),
-                    ),
-                  ),
-                ),
-
-                // 아바타 모핑
-                Align(
-                  alignment: align,
-                  child: Hero(
-                    tag: widget.heroTag,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(r),
-                      child: Container(
-                        width: box,
-                        height: box,
-                        color: const Color(0xFF1F2937),
-                        child: widget.image != null
-                            ? Image(image: widget.image!, fit: BoxFit.cover)
-                            : const Icon(Icons.person,
-                            color: Colors.white30, size: 56),
+              return Stack(
+                children: [
+                  // 어두운 배경 + 살짝 블러 효과
+                  Positioned.fill(
+                    child: Opacity(
+                      opacity: bgOpacity,
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 2, sigmaY: 2),
+                        child: Container(color: Colors.black),
                       ),
                     ),
                   ),
-                ),
-              ],
-            );
-          },
+
+                  // 아바타 모핑
+                  Align(
+                    alignment: align,
+                    child: Hero(
+                      tag: widget.heroTag,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(r),
+                        child: Container(
+                          width: box,
+                          height: box,
+                          color: const Color(0xFF1F2937),
+                          child: widget.image != null
+                              ? Image(image: widget.image!, fit: BoxFit.cover)
+                              : const Icon(Icons.person,
+                              color: Colors.white30, size: 56),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
         ),
       ),
     );
