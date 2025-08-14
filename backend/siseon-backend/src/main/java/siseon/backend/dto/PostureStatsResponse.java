@@ -1,13 +1,14 @@
 package siseon.backend.dto;
 
 import lombok.*;
+import lombok.experimental.SuperBuilder;
 import siseon.backend.domain.batch.PostureStats;
 
 import java.time.LocalDateTime;
 import java.util.Map;
 
 @Getter
-@Builder
+@SuperBuilder
 @AllArgsConstructor
 @NoArgsConstructor
 public class PostureStatsResponse {
@@ -20,6 +21,7 @@ public class PostureStatsResponse {
     private int durationSeconds;
     private int slotIndex;
     private Boolean validPosture;
+    private Map<String, Object> badReasons;
 
     public static PostureStatsResponse from(PostureStats entity) {
         return PostureStatsResponse.builder()
@@ -32,6 +34,7 @@ public class PostureStatsResponse {
                 .durationSeconds(entity.getDurationSeconds())
                 .slotIndex(entity.getSlotIndex())
                 .validPosture(entity.getValidPosture())
+                .badReasons(entity.getBadReasons())
                 .build();
     }
 }
