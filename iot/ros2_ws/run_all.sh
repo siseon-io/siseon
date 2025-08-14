@@ -8,7 +8,7 @@ cd "$SCRIPT_DIR"
 DEBUG_MODE=${DEBUG:-false}
 
 echo "🔧 Building workspace..."
-# colcon build --packages-ignore lidar_node
+colcon build --packages-ignore lidar_node
 
 echo "🌍 Setting up environment..."
 source install/setup.bash
