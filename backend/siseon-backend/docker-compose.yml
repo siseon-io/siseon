@@ -7,8 +7,7 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Seoul
-      MYSQL_ROOT_PASSWORD: ss@fy1234
-      MYSQL_DATABASE: siseon
+      JAVA_TOOL_OPTIONS: "-Duser.timezone=Asia/Seoul"
       MYSQL_USER: ${DB_USER}
       MYSQL_PASSWORD: ${DB_PASS}
     command: --default-time-zone=Asia/Seoul

@@ -47,3 +47,10 @@ logging:
 
 firebase:
   service-account-file: classpath:firebase/serviceAccountKey.json
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    urls:
+      - name: SISEON API
+        url: /v3/api-docs
