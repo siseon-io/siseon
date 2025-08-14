@@ -401,12 +401,12 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 24),
-          _buildMenuItem(Icons.account_circle, '프로필 변경', () {
-            Navigator.pushReplacement(
-              context,
-              _slideRightToLeft(const ProfileSelectScreen()),
-            );
-          }),
+        _buildMenuItem(Icons.account_circle, '프로필 변경', () {
+          Navigator.push(
+            context,
+            _slideRightToLeft(const ProfileSelectScreen(allowBack: true)),
+          );
+        }),
           _buildMenuItem(Icons.edit, '프로필 수정', () {
             Navigator.push(
               context,
