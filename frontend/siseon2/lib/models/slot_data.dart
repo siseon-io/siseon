@@ -35,8 +35,64 @@ class PostureStatsDay {
 /// ─────────────────────────────────────────────────────────────────────────────
 /// Minute 원본 응답 모델 (period=daily|weekly|monthly)
 ///   [ { id, profileId, monitorCoord?, userCoord?, startAt, endAt,
-///       durationSeconds, slotIndex, validPosture? }, ... ]
+///       durationSeconds, slotIndex, validPosture?|valid?, badReasons?, summary? }, ... ]
 /// ─────────────────────────────────────────────────────────────────────────────
+
+/// 🔹 나쁜자세 세부 사유 (배너/조언 표시용)
+class BadReason {
+  final String? label;
+  final String? code;
+  final String? cue;
+  final String? ergonomics;
+  final double? angle;
+  final double? threshold;
+  final String? severity;
+  final String? direction;
+
+  BadReason({
+    this.label,
+    this.code,
+    this.cue,
+    this.ergonomics,
+    this.angle,
+    this.threshold,
+    this.severity,
+    this.direction,
+  });
+
+  factory BadReason.fromJson(Map<String, dynamic> j) => BadReason(
+    label: j['label'] as String?,
+    code: j['code'] as String?,
+    cue: j['cue'] as String?,
+    ergonomics: j['ergonomics'] as String?,
+    angle: (j['angle'] as num?)?.toDouble(),
+    threshold: (j['threshold'] as num?)?.toDouble(),
+    severity: j['severity'] as String?,
+    direction: j['direction'] as String?,
+  );
+}
+
+/// 🔹 나쁜자세 묶음 (valid + reasons + summary)
+class BadReasons {
+  final bool? valid; // 서버가 여기에도 valid를 내려줌 (예: false)
+  final List<BadReason> reasons;
+  final String? summary; // 예: "거북목(148.8°), …"
+
+  BadReasons({
+    this.valid,
+    required this.reasons,
+    this.summary,
+  });
+
+  factory BadReasons.fromJson(Map<String, dynamic> j) => BadReasons(
+    valid: _asBoolOrNull(j['valid']),
+    summary: j['summary'] as String?,
+    reasons: (j['reasons'] as List<dynamic>? ?? [])
+        .map((e) => BadReason.fromJson(e as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
 class PostureStatsMinute {
   final int id;
   final int profileId;
@@ -48,8 +104,16 @@ class PostureStatsMinute {
   final DateTime startAt;
   final DateTime endAt;
   final int durationSeconds; // 보통 60
-  final int slotIndex;       // 10분 단위 인덱스 등
-  final bool? validPosture;  // null-safe
+  final int slotIndex; // 10분 단위 인덱스 등
+
+  /// 서버가 `validPosture` 또는 `valid`로 줄 수 있어 모두 허용
+  final bool? validPosture;
+
+  /// 🔹 추가: 나쁜자세 상세
+  final BadReasons? badReasons;
+
+  /// 🔹 선택: top-level summary (혹시 이 위치로도 내려오면 사용)
+  final String? summary;
 
   PostureStatsMinute({
     required this.id,
@@ -61,6 +125,8 @@ class PostureStatsMinute {
     required this.durationSeconds,
     required this.slotIndex,
     required this.validPosture,
+    this.badReasons,
+    this.summary,
   });
 
   factory PostureStatsMinute.fromJson(Map<String, dynamic> j) => PostureStatsMinute(
@@ -70,9 +136,20 @@ class PostureStatsMinute {
     userCoord: _asMapOrNull(j['userCoord'] ?? j['user_coord']),
     startAt: _asDate(j['startAt'] ?? j['start_at']),
     endAt: _asDate(j['endAt'] ?? j['end_at']),
-    durationSeconds: _asInt(j['durationSeconds'] ?? j['duration_seconds'] ?? j['duration']),
+    durationSeconds:
+    _asInt(j['durationSeconds'] ?? j['duration_seconds'] ?? j['duration']),
     slotIndex: _asInt(j['slotIndex'] ?? j['slot_index'] ?? j['slot']),
-    validPosture: _asBoolOrNull(j['validPosture'] ?? j['valid_posture']),
+    // valid: 서버가 validPosture 또는 valid 로 줄 수 있음
+    validPosture: _asBoolOrNull(j['validPosture'] ?? j['valid_posture'] ?? j['valid']),
+    // badReasons: camelCase / snake_case 모두 대응
+    badReasons: (() {
+      final raw = j['badReasons'] ?? j['bad_reasons'];
+      if (raw is Map<String, dynamic>) return BadReasons.fromJson(raw);
+      if (raw is Map) return BadReasons.fromJson(Map<String, dynamic>.from(raw));
+      return null;
+    })(),
+    // 혹시 top-level 로 summary가 오면 받아둠
+    summary: j['summary'] as String?,
   );
 }
 
