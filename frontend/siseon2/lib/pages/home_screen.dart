@@ -7,6 +7,7 @@ import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart'; // ✅ 모드 저장/복원 (프로필별)
 
 import 'package:siseon2/models/control_mode.dart';
 import 'package:siseon2/models/slot_data.dart';
@@ -16,7 +17,7 @@ import 'package:siseon2/services/preset_service.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
 import 'package:siseon2/services/device_cache_service.dart';
 import 'package:siseon2/services/stats_service.dart';
-import 'package:siseon2/services/ble_session.dart'; // ✅ 세션 기반으로 상태 반영
+import 'package:siseon2/services/ble_session.dart';
 
 import 'package:siseon2/pages/ble_scan_screen.dart';
 import 'package:siseon2/pages/device_register_page.dart';
@@ -49,7 +50,7 @@ class HomeScreen extends StatefulWidget {
   HomeScreenState createState() => HomeScreenState();
 }
 
-class HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // Colors
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color backgroundBlack = Color(0xFF0D1117);
@@ -68,9 +69,9 @@ class HomeScreenState extends State<HomeScreen> {
   bool _isDeviceRegistered = false;
   bool _deviceStateReady = false;
   String? _deviceSerial;
-  String? _targetCharUuid; // ✅ 디바이스 캐시에서 동적 로드
+  String? _targetCharUuid;
 
-  // 🔗 세션에서 복사해서 UI 표시용으로만 씀(소스 오브 트루스는 bleSession)
+  // BLE session snapshot (UI 표시용)
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _writableChar;
 
@@ -79,12 +80,14 @@ class HomeScreenState extends State<HomeScreen> {
   int _goodSecToday = 0;
   int _badSecToday = 0;
 
-  Timer? _postureTimer;
+  // ⬇️ 폴링(1분) & 로딩상태
+  Timer? _pollTimer;
+  bool _isPolling = false;
+
   DateTime? _postureTime;
   bool _loadingPosture = false;
   PostureBannerStatus _postureStatus = PostureBannerStatus.none;
 
-  // ─────────── 세션 리스너 ───────────
   bool get _bleReady => bleSession.isReady;
 
   void _copyFromSession() {
@@ -100,16 +103,15 @@ class HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // 라이프사이클 감시
     _mode = widget.currentMode;
     FlutterBluePlus.setLogLevel(LogLevel.none);
     _initPermissions();
     _checkBluetoothState();
     _syncProfileAndDevice();
-    _loadLatestPosture();
-    _postureTimer =
-        Timer.periodic(const Duration(minutes: 5), (_) => _loadLatestPosture());
+    _loadLatestPosture(); // 첫 로딩은 스피너 보임
+    _startPolling();      // 1분 폴링 시작
 
-    // ✅ 세션 구독
     bleSession.addListener(_onBleSessionChanged);
     _copyFromSession();
   }
@@ -130,12 +132,62 @@ class HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _postureTimer?.cancel();
+    _stopPolling();
     bleSession.removeListener(_onBleSessionChanged);
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  void setModeExternal(ControlMode newMode) => _setMode(newMode);
+  // 앱 라이프사이클: 복귀 시 즉시 새로고침, 백그라운드 시 폴링 중단
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _refreshSilently();
+      _startPolling();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _stopPolling();
+    }
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(minutes: 1), (_) => _refreshSilently());
+  }
+
+  void _stopPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+  }
+
+  Future<void> _refreshSilently() async {
+    if (_isPolling) return;
+    _isPolling = true;
+    try {
+      await _loadLatestPosture(silent: true); // 스피너 없이
+      await _loadDailyStats();                // 오늘 통계도 갱신
+    } finally {
+      _isPolling = false;
+    }
+  }
+
+  // ───────────── 공용 헬퍼: 프로필별 모드 키 ─────────────
+  String? _modeKeyForCurrentProfile() {
+    final pid = _profile?['id'];
+    if (pid == null) return null;
+    return 'mode:profile:$pid';
+  }
+
+  // ✅ 외부에서 모드 동기화만 (발행 없음) + 프로필별 저장
+  void setModeLocal(ControlMode newMode) {
+    if (_mode == newMode) return;
+    setState(() => _mode = newMode);
+    _persistMode(newMode); // 프로필별 저장
+    widget.onModeChange(newMode);
+  }
+
+  void setModeExternal(ControlMode newMode) => setModeLocal(newMode);
 
   // ─────────── 권한/상태 ───────────
   Future<void> _initPermissions() async {
@@ -158,13 +210,20 @@ class HomeScreenState extends State<HomeScreen> {
   // ─────────── 프로필/디바이스 동기화 ───────────
   Future<void> _syncProfileAndDevice() async {
     final profile = await ProfileCacheService.loadProfile();
-    final pid = profile?['id'] as int?;
+
+    // 프로필 전환 직후: 로딩 동안 이전 프로필 모드가 비치지 않도록 즉시 OFF 표기
     setState(() {
       _profile = profile;
       _deviceStateReady = false;
+      _isDeviceRegistered = false;
+      _deviceSerial = null;
+      _targetCharUuid = null;
+      _mode = ControlMode.off; // 임시 OFF
     });
+
     await _loadProfileAndPresets();
     await _loadDailyStats();
+    final pid = profile?['id'] as int?;
     await _loadDeviceStateFor(pid);
   }
 
@@ -177,18 +236,24 @@ class HomeScreenState extends State<HomeScreen> {
         _targetCharUuid = null;
         _deviceStateReady = true;
       });
+      setModeLocal(ControlMode.off);
       return;
     }
+
     final device = await DeviceCacheService.loadDeviceForProfile(profileId);
     if (!mounted) return;
     setState(() {
       _isDeviceRegistered = device != null;
       _deviceSerial = device?['serial'];
-      _targetCharUuid = device?['targetCharUuid'] ??
-          device?['charUuid'] ??
-          device?['characteristicUuid'];
+      _targetCharUuid = device?['targetCharUuid'] ?? device?['charUuid'] ?? device?['characteristicUuid'];
       _deviceStateReady = true;
     });
+
+    if (!_isDeviceRegistered) {
+      setModeLocal(ControlMode.off);
+    } else {
+      await _restoreModeForProfile(); // 프로필별 복원 (발행 없음)
+    }
   }
 
   Future<void> _loadProfileAndPresets() async {
@@ -243,9 +308,9 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  Future<void> _loadLatestPosture() async {
+  Future<void> _loadLatestPosture({bool silent = false}) async {
     try {
-      setState(() => _loadingPosture = true);
+      if (!silent) setState(() => _loadingPosture = true);
 
       final profile = await ProfileCacheService.loadProfile();
       final profileId = profile?['profileId'] ?? profile?['id'];
@@ -279,16 +344,14 @@ class HomeScreenState extends State<HomeScreen> {
 
       list.sort((a, b) => a.endAt.compareTo(b.endAt));
       final latest = list.last;
-
       final v = _valid(latest);
 
       setState(() {
-        if (v == null) {
-          _postureStatus = PostureBannerStatus.none;
-        } else {
-          _postureStatus =
-          v ? PostureBannerStatus.good : PostureBannerStatus.bad;
-        }
+        _postureStatus = (v == true)
+            ? PostureBannerStatus.good
+            : (v == false)
+            ? PostureBannerStatus.bad
+            : PostureBannerStatus.none;
         _postureTime = latest.endAt.toLocal();
         _loadingPosture = false;
       });
@@ -343,7 +406,6 @@ class HomeScreenState extends State<HomeScreen> {
     mqttService.publish(topic, {'profile_id': profileId.toString()});
     await Future.delayed(const Duration(milliseconds: 350));
 
-    // ✅ 하드코딩 없이 UUID 전달
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(
@@ -351,7 +413,6 @@ class HomeScreenState extends State<HomeScreen> {
       ),
     );
 
-    // ⬇️ 세션 우선으로 연결 성공 판단
     if (bleSession.isReady) {
       setState(_copyFromSession);
       widget.onConnect?.call(bleSession.char!);
@@ -363,7 +424,6 @@ class HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    // 세션이 준비 안됐는데 result가 있으면 fallback
     if (result != null) {
       setState(() {
         _connectedDevice = result['device'] as BluetoothDevice?;
@@ -381,8 +441,77 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _handleDisconnect() async {
-    await bleSession.disconnect(); // ✅ 세션 기준 해제
+    await bleSession.disconnect();
     setState(_copyFromSession);
+    setModeLocal(ControlMode.off);
+  }
+
+  // ─────────── 모드 영속화 (프로필별) ───────────
+  Future<void> _persistMode(ControlMode m) async {
+    final key = _modeKeyForCurrentProfile();
+    if (key == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, m.name);
+  }
+
+  Future<void> _restoreModeForProfile() async {
+    final key = _modeKeyForCurrentProfile();
+    final prefs = await SharedPreferences.getInstance();
+    String? s;
+    if (key != null) {
+      s = prefs.getString(key);
+    }
+    // (하위 호환) 예전 디바이스 기반 키가 있으면 한번 읽어와줌
+    if (s == null && _deviceSerial != null) {
+      s = prefs.getString('mode:${_deviceSerial!}');
+    }
+    final restored = ControlMode.values.firstWhere(
+          (e) => e.name == s,
+      orElse: () => ControlMode.off,
+    );
+    setModeLocal(restored); // 발행 없이 UI만
+  }
+
+  // ─────────── 미등록/미준비 가드 ───────────
+  Future<bool> _requireDeviceReadyAndRegistered() async {
+    if (!_deviceStateReady) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('⏳ 기기 상태 확인 중입니다. 잠시만요.')),
+      );
+      return false;
+    }
+    if (_isDeviceRegistered) return true;
+
+    final go = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => AlertDialog(
+        backgroundColor: headerGrey,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('기기 등록이 필요합니다',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+        content: const Text('이 기능을 사용하려면 먼저 기기를 등록해주세요.',
+            style: TextStyle(color: Colors.white70)),
+        actions: [
+          // ✅ 순서: 등록하기(왼쪽) → 취소(오른쪽)
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('등록하기',
+                style: TextStyle(color: primaryBlue, fontWeight: FontWeight.w700)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
+    );
+
+    if (go == true) {
+      await _registerDevice();
+      return _isDeviceRegistered;
+    }
+    return false;
   }
 
   // ─────────── 모드 제어 ───────────
@@ -390,6 +519,7 @@ class HomeScreenState extends State<HomeScreen> {
     final prev = _mode;
     if (prev == newMode) return;
     setState(() => _mode = newMode);
+    _persistMode(newMode); // 프로필별 저장
     _publishMode(prev, newMode);
     widget.onModeChange(newMode);
   }
@@ -418,14 +548,19 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _switchToAiMode() {
+  Future<void> _switchToAiMode() async {
     if (_profile == null) return;
+    final ok = await _requireDeviceReadyAndRegistered();
+    if (!ok) return;
     _setMode(ControlMode.auto);
     widget.onAiModeSwitch();
   }
 
   Future<void> _handlePresetSelect(int presetId) async {
     if (_profile == null) return;
+    final ok = await _requireDeviceReadyAndRegistered();
+    if (!ok) return;
+
     final prev = _mode;
     final profileId = _profile!['id'];
 
@@ -433,10 +568,7 @@ class HomeScreenState extends State<HomeScreen> {
       final token = await AuthService.getValidAccessToken();
       await http.post(
         Uri.parse('https://i13b101.p.ssafy.io/siseon/api/preset-coordinate'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
+        headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer $token'},
         body: jsonEncode({"profile_id": profileId, "preset_id": presetId}),
       );
       _setMode(ControlMode.preset);
@@ -454,12 +586,28 @@ class HomeScreenState extends State<HomeScreen> {
       return;
     }
     final profileId = _profile!['id'];
-    final created = await PresetService.createPreset(
-      '프리셋 ${_presets.length + 1}',
-      profileId,
-      1,
-    );
+    final created =
+    await PresetService.createPreset('프리셋 ${_presets.length + 1}', profileId, 1);
     if (created != null) await _loadProfileAndPresets();
+  }
+
+  // ─────────── MQTT 전체 초기화(모든 prev -> off 발행) ───────────
+  Future<void> _resetMqttAllModes() async {
+    final ok = await _requireDeviceReadyAndRegistered();
+    if (!ok) return;
+
+    // 모든 모드에 대해 prev -> off 전송
+    for (final prev in ControlMode.values) {
+      if (prev == ControlMode.off) continue;
+      _publishMode(prev, ControlMode.off);
+      await Future.delayed(const Duration(milliseconds: 120));
+    }
+
+    setModeLocal(ControlMode.off);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('🔁 MQTT 초기화: 모든 모드를 OFF로 재발행 완료')),
+    );
   }
 
   Color _getModeColor() {
@@ -490,8 +638,7 @@ class HomeScreenState extends State<HomeScreen> {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(title,
-            style: const TextStyle(
-                color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
         if (onTap != null)
           IconButton(
             onPressed: onTap,
@@ -515,7 +662,7 @@ class HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    final isConnected = _bleReady; // ✅ 세션 기준
+    final isConnected = _bleReady;
 
     return Scaffold(
       backgroundColor: backgroundBlack,
@@ -554,20 +701,12 @@ class HomeScreenState extends State<HomeScreen> {
                           Text(
                             _profile!['name'] ?? '사용자',
                             style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                              height: 1.15,
-                            ),
+                                fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white, height: 1.15),
                           ),
                           const SizedBox(height: 2),
                           Text(
                             _profile!['email'] ?? '',
-                            style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                              height: 1.1,
-                            ),
+                            style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.1),
                           ),
                         ],
                       ),
@@ -576,12 +715,8 @@ class HomeScreenState extends State<HomeScreen> {
                   IconButton(
                     icon: const Icon(Icons.settings, color: Colors.white),
                     onPressed: () async {
-                      final changed = await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const EditProfilePage(),
-                        ),
-                      );
+                      final changed =
+                      await Navigator.push(context, MaterialPageRoute(builder: (_) => const EditProfilePage()));
                       if (changed == true) {
                         _loadProfileAndPresets();
                       }
@@ -606,10 +741,8 @@ class HomeScreenState extends State<HomeScreen> {
               _sectionHeader(
                 title: '프리셋',
                 onTap: () async {
-                  final changed = await Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const PresetPage()),
-                  );
+                  final changed =
+                  await Navigator.push(context, MaterialPageRoute(builder: (_) => const PresetPage()));
                   if (changed == true) await _loadProfileAndPresets();
                 },
               ),
@@ -627,10 +760,7 @@ class HomeScreenState extends State<HomeScreen> {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          flex: 2,
-          child: SizedBox(height: leftHeight, child: _modeStatusCardCentered()),
-        ),
+        Expanded(flex: 2, child: SizedBox(height: leftHeight, child: _modeStatusCardCentered())),
         const SizedBox(width: 10),
         Expanded(
           flex: 1,
@@ -649,27 +779,43 @@ class HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // 🔴 우상단 작은 초기화 버튼 포함
   Widget _modeStatusCardCentered() {
     return RectCard(
       bgColor: headerGrey,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('모드 상태',
-                style: TextStyle(color: Colors.white54, fontSize: 14)),
-            const SizedBox(height: 6),
-            Text(
-              _mode == ControlMode.off ? '전원 꺼짐' : _mode.name.toUpperCase(),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: _getModeColor(),
-                fontSize: 26,
-                fontWeight: FontWeight.w800,
+      child: Stack(
+        children: [
+          // 초기화 버튼 (우상단)
+          Positioned(
+            top: 6,
+            right: 6,
+            child: SizedBox(
+              width: 28,
+              height: 28,
+              child: IconButton(
+                tooltip: 'MQTT 초기화 (전체 → OFF)',
+                padding: EdgeInsets.zero,
+                onPressed: _resetMqttAllModes,
+                icon: const Icon(Icons.restart_alt, size: 16, color: Colors.redAccent),
               ),
             ),
-          ],
-        ),
+          ),
+          // 본문
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('모드 상태', style: TextStyle(color: Colors.white54, fontSize: 14)),
+                const SizedBox(height: 6),
+                Text(
+                  _mode == ControlMode.off ? '전원 꺼짐' : _mode.name.toUpperCase(),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: _getModeColor(), fontSize: 26, fontWeight: FontWeight.w800),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -692,39 +838,29 @@ class HomeScreenState extends State<HomeScreen> {
 
   Widget _bleCard(bool isConnected) {
     const double iconSize = 22;
-
     return RectCard(
       bgColor: headerGrey,
       child: Center(
         child: _isDeviceRegistered
-            ? (
-            isConnected
-            // ✅ 연결됨: 아이콘을 탭하면 즉시 해제
-                ? GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: () async {
-                await _handleDisconnect();
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('🔌 BLE 연결을 해제했습니다.')),
-                );
-              },
-              child: const Icon(
-                Icons.bluetooth_connected,
-                color: primaryBlue,
-                size: iconSize,
-              ),
-            )
-            // 미연결: 스캔 버튼
-                : IconButton(
-              tooltip: '스캔',
-              onPressed: _requestPairAndScan,
-              iconSize: iconSize,
-              icon: const Icon(Icons.bluetooth_searching),
-              color: Colors.white70,
-            )
+            ? (isConnected
+            ? GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () async {
+            await _handleDisconnect();
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('🔌 BLE 연결을 해제했습니다.')),
+            );
+          },
+          child: const Icon(Icons.bluetooth_connected, color: primaryBlue, size: iconSize),
         )
-        // 미등록: 등록 버튼
+            : IconButton(
+          tooltip: '스캔',
+          onPressed: _requestPairAndScan,
+          iconSize: iconSize,
+          icon: const Icon(Icons.bluetooth_searching),
+          color: Colors.white70,
+        ))
             : IconButton(
           tooltip: '기기 등록',
           onPressed: _registerDevice,
@@ -743,9 +879,7 @@ class HomeScreenState extends State<HomeScreen> {
         child: SizedBox(
           width: 54,
           height: 12,
-          child: DecoratedBox(
-            decoration: BoxDecoration(color: Colors.white12),
-          ),
+          child: DecoratedBox(decoration: BoxDecoration(color: Colors.white12)),
         ),
       ),
     );
@@ -758,28 +892,15 @@ class HomeScreenState extends State<HomeScreen> {
         outlineColor: primaryBlue.withOpacity(0.45),
         child: const Row(
           children: [
-            SizedBox(
-              width: 18,
-              height: 18,
-              child:
-              CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-            ),
+            SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
             SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '최근 자세 데이터를 불러오는 중...',
-                style:
-                TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-              ),
-            ),
+            Expanded(child: Text('최근 자세 데이터를 불러오는 중...', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600))),
           ],
         ),
       );
     }
 
-    if (_postureStatus == PostureBannerStatus.none) {
-      return const SizedBox.shrink();
-    }
+    if (_postureStatus == PostureBannerStatus.none) return const SizedBox.shrink();
 
     final isGood = _postureStatus == PostureBannerStatus.good;
     final title = isGood ? '올바른 자세입니다! 대단해요!' : '잘못된 자세입니다! 교정해주세요!';
@@ -793,17 +914,10 @@ class HomeScreenState extends State<HomeScreen> {
           Icon(icon, color: isGood ? primaryBlue : errorRed),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
-            ),
+            child: Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
           ),
           if (_postureTime != null)
-            Text(
-              DateFormat('HH:mm').format(_postureTime!),
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
-            ),
+            Text(DateFormat('HH:mm').format(_postureTime!), style: const TextStyle(color: Colors.white70, fontSize: 12)),
         ],
       ),
     );
@@ -815,10 +929,7 @@ class HomeScreenState extends State<HomeScreen> {
     final total = good + bad;
 
     if (total == 0) {
-      return const Center(
-        child: Text('데이터 없음',
-            style: TextStyle(color: Colors.white70, fontSize: 12)),
-      );
+      return const Center(child: Text('데이터 없음', style: TextStyle(color: Colors.white70, fontSize: 12)));
     }
 
     return PieChart(
@@ -839,46 +950,30 @@ class HomeScreenState extends State<HomeScreen> {
     return RectCard(
       bgColor: headerGrey,
       outlineColor: Colors.white.withOpacity(0.16),
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const StatsPage()),
-      ),
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StatsPage())),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
         child: Row(
           children: [
-            Padding(
-              padding: const EdgeInsets.only(left: 20),
-              child: SizedBox(width: 110, height: 110, child: _miniTodayPie()),
-            ),
+            Padding(padding: const EdgeInsets.only(left: 20), child: SizedBox(width: 110, height: 110, child: _miniTodayPie())),
             const SizedBox(width: 28),
             Expanded(
               child: total == 0
                   ? const Align(
                 alignment: Alignment.centerRight,
-                child: Text(
-                  '오늘 데이터가 아직 없어요',
-                  style: TextStyle(color: Colors.white, fontSize: 13),
-                  textAlign: TextAlign.right,
-                ),
+                child: Text('오늘 데이터가 아직 없어요', style: TextStyle(color: Colors.white, fontSize: 13), textAlign: TextAlign.right),
               )
                   : Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  _legendLine(errorRed, '잘못된 자세',
-                      _formatDurationKr(_badSecToday)),
+                  _legendLine(errorRed, '잘못된 자세', _formatDurationKr(_badSecToday)),
                   const SizedBox(height: 6),
-                  _legendLine(primaryBlue, '올바른 자세',
-                      _formatDurationKr(_goodSecToday)),
+                  _legendLine(primaryBlue, '올바른 자세', _formatDurationKr(_goodSecToday)),
                   const SizedBox(height: 8),
                   _rightInfoLine('총 시간', _formatDurationKr(total)),
                   const SizedBox(height: 2),
-                  const Text(
-                    '탭하면 자세한 통계로 이동',
-                    style: TextStyle(color: Colors.white, fontSize: 11),
-                    textAlign: TextAlign.right,
-                  ),
+                  const Text('탭하면 자세한 통계로 이동', style: TextStyle(color: Colors.white, fontSize: 11), textAlign: TextAlign.right),
                 ],
               ),
             ),
@@ -892,21 +987,9 @@ class HomeScreenState extends State<HomeScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(
-            color: dotColor,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
+        Container(width: 8, height: 8, decoration: BoxDecoration(color: dotColor, borderRadius: BorderRadius.circular(2))),
         const SizedBox(width: 6),
-        Text(
-          '$label : $value',
-          style: const TextStyle(color: Colors.white, fontSize: 13),
-          textAlign: TextAlign.right,
-          softWrap: false,
-        ),
+        Text('$label : $value', style: const TextStyle(color: Colors.white, fontSize: 13), textAlign: TextAlign.right, softWrap: false),
       ],
     );
   }
@@ -915,12 +998,7 @@ class HomeScreenState extends State<HomeScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        Text(
-          '$label: $value',
-          style: const TextStyle(color: Colors.white, fontSize: 12),
-          textAlign: TextAlign.right,
-          softWrap: false,
-        ),
+        Text('$label: $value', style: const TextStyle(color: Colors.white, fontSize: 12), textAlign: TextAlign.right, softWrap: false),
       ],
     );
   }
@@ -965,11 +1043,7 @@ class HomeScreenState extends State<HomeScreen> {
         children: [
           Icon(Icons.add, size: 16, color: Colors.white70),
           SizedBox(width: 8),
-          Text(
-            '프리셋 추가',
-            style:
-            TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
-          ),
+          Text('프리셋 추가', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -982,9 +1056,7 @@ class HomeScreenState extends State<HomeScreen> {
       elevated: true,
       height: 56,
       onTap: _addPreset,
-      child: const Center(
-        child: Icon(Icons.add, size: 18, color: Colors.white70),
-      ),
+      child: const Center(child: Icon(Icons.add, size: 18, color: Colors.white70)),
     );
   }
 
@@ -996,12 +1068,7 @@ class HomeScreenState extends State<HomeScreen> {
       height: 56,
       onTap: () => _handlePresetSelect(presetId),
       child: Center(
-        child: Text(
-          name,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-              color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
-        ),
+        child: Text(name, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
       ),
     );
   }
