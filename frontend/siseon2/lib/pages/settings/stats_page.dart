@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
+
 import 'package:siseon2/models/slot_data.dart';
 import 'package:siseon2/services/stats_service.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
@@ -14,28 +15,26 @@ class StatsPage extends StatefulWidget {
 }
 
 class _StatsPageState extends State<StatsPage> {
-  // ── THEME ────────────────────────────────────────────────────────────────────
+  // THEME
   static const Color backgroundBlack = Color(0xFF0D1117);
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color errorRed = Color(0xFFF87171);
   static const TextStyle _label = TextStyle(
       color: Colors.white70, fontSize: 12);
 
-  // ── STATE ────────────────────────────────────────────────────────────────────
-  List<PostureStats> _daily = [];
-  List<PostureStats> _weekly = [];
-  List<PostureStats> _monthly = [];
+  // STATE
 
+  List<PostureStatsMinute> _dailyMins = []; // period=daily
+  List<PostureStatsDay> _weeklyDays = []; // period=day (최근7일)
+  List<PostureStatsDay> _monthlyDays = []; // ✅ 폴백용(day 집계 12개월)
   bool _isLoading = true;
   String? _error;
 
-  // weekly tooltip
-  int? _touchedWeekIndex; // 0(Sun) ~ 6(Sat)
+  int? _touchedWeekIndex; // 0~6
   int _touchedWeekGood = 0;
   int _touchedWeekBad = 0;
 
-  // monthly tooltip (회전 후 인덱스 0~11)
-  int? _touchedMonth;
+  int? _touchedMonth; // 0~11(회전 후)
   int _touchedMonthGood = 0;
   int _touchedMonthBad = 0;
 
@@ -56,59 +55,58 @@ class _StatsPageState extends State<StatsPage> {
     try {
       final profile = await ProfileCacheService.loadProfile();
       final profileId = profile?['profileId'] ?? profile?['id'];
-      if (profileId == null) {
-        throw Exception('프로필을 찾을 수 없어요. 프로필을 먼저 선택해주세요.');
-      }
+      if (profileId == null) throw Exception('프로필을 찾을 수 없어요. 프로필을 먼저 선택해주세요.');
 
-      // ✅ 조회 범위 정의
       final now = DateTime.now();
       final todayStart = DateTime(now.year, now.month, now.day);
+      final todayEnd = DateTime(
+          now.year,
+          now.month,
+          now.day,
+          23,
+          59,
+          59,
+          999);
 
-      final fromDaily = todayStart; // 오늘 00:00 ~ 지금
-      final toDaily = now;
+      // ✅ 최근 12개월 시작(해당 월 1일 00:00)
+      final firstMonth = DateTime(now.year, now.month - 11, 1);
 
-      final fromWeekly = todayStart.subtract(const Duration(days: 6)); // 최근 7일
-      final toWeekly = now;
-
-      final fromMonthly = todayStart.subtract(
-          const Duration(days: 365)); // 최근 12개월
-      final toMonthly = now;
-
-      // ✅ from/to 넣어서 호출
+      // 병렬 호출
       final results = await Future.wait([
-        StatsService.fetchPostureStats(
+        // 일간 도넛: minute(daily)
+        StatsService.fetchMinuteStats(profileId: profileId, period: 'daily'),
+
+        // 주간 스택바: day 집계(최근 7일)
+        StatsService.fetchDayStats(
           profileId: profileId,
-          period: 'daily',
-          from: fromDaily,
-          to: toDaily,
+          from: todayStart.subtract(const Duration(days: 6)),
+          to: todayEnd,
         ),
-        StatsService.fetchPostureStats(
+
+        // ✅ 월간 트렌드: day 집계(최근 12개월)로 변경
+        StatsService.fetchDayStats(
           profileId: profileId,
-          period: 'weekly',
-          from: fromWeekly,
-          to: toWeekly,
-        ),
-        StatsService.fetchPostureStats(
-          profileId: profileId,
-          period: 'monthly',
-          from: fromMonthly,
-          to: toMonthly,
+          from: firstMonth,
+          to: todayEnd,
         ),
       ]);
 
+      if (!mounted) return;
       setState(() {
-        _daily = results[0];
-        _weekly = results[1];
-        _monthly = results[2];
+        _dailyMins = results[0] as List<PostureStatsMinute>;
+        _weeklyDays = results[1] as List<PostureStatsDay>;
+        _monthlyDays = results[2] as List<PostureStatsDay>; // ✅
       });
     } catch (e) {
-      setState(() => _error = '통계 데이터를 불러오지 못했어요.\n(${e.toString()})');
+      if (!mounted) return;
+      setState(() => _error = '통계를 불러오지 못했어요.\n(${e.toString()})');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // ── HELPERS ──────────────────────────────────────────────────────────────────
+
+  // HELPERS
   String _formatDuration(int seconds) {
     if (seconds <= 0) return '0분';
     final h = seconds ~/ 3600;
@@ -117,7 +115,6 @@ class _StatsPageState extends State<StatsPage> {
     return '${m}분';
   }
 
-  // 일(0)~토(6) 인덱스 기준으로 이번 주 해당 날짜 (기준: 일요일 시작)
   DateTime _dateForWeekIndex(int index) {
     final now = DateTime.now();
     final startOfWeek = now.subtract(Duration(days: now.weekday % 7)); // Sun=0
@@ -125,7 +122,6 @@ class _StatsPageState extends State<StatsPage> {
         .add(Duration(days: index));
   }
 
-  // 배열 왼쪽 회전: k칸
   List<T> _rotateLeft<T>(List<T> list, int k) {
     if (list.isEmpty) return list;
     final r = k % list.length;
@@ -133,7 +129,6 @@ class _StatsPageState extends State<StatsPage> {
     return [...list.sublist(r), ...list.sublist(0, r)];
   }
 
-  // 카드 오른쪽 상단 범례
   Widget _legendMini() {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -149,7 +144,7 @@ class _StatsPageState extends State<StatsPage> {
     );
   }
 
-  // ── BUILD ────────────────────────────────────────────────────────────────────
+  // BUILD
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -171,11 +166,8 @@ class _StatsPageState extends State<StatsPage> {
               children: [
                 const Icon(Icons.error_outline, color: errorRed, size: 36),
                 const SizedBox(height: 12),
-                Text(
-                  _error!,
-                  style: const TextStyle(color: Colors.white70),
-                  textAlign: TextAlign.center,
-                ),
+                Text(_error!, style: const TextStyle(color: Colors.white70),
+                    textAlign: TextAlign.center),
                 const SizedBox(height: 16),
                 FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: primaryBlue),
@@ -201,7 +193,7 @@ class _StatsPageState extends State<StatsPage> {
           child: ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              // ── 카드 1: 일간 도넛 ──
+              // 일간 도넛
               RectCard(
                 elevated: true,
                 outlineColor: Colors.white.withOpacity(0.16),
@@ -209,21 +201,13 @@ class _StatsPageState extends State<StatsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            '일간 자세 비율',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        _legendMini(),
-                      ],
-                    ),
+                    Row(children: [
+                      const Expanded(child: Text('일간 자세 비율', style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600))),
+                      _legendMini()
+                    ]),
                     const SizedBox(height: 12),
                     SizedBox(height: 220, child: _AveragePieChart()),
                   ],
@@ -231,7 +215,7 @@ class _StatsPageState extends State<StatsPage> {
               ),
               const SizedBox(height: 20),
 
-              // ── 카드 2: 주간 스택 바 ──
+              // 주간 스택 바
               RectCard(
                 elevated: true,
                 outlineColor: Colors.white.withOpacity(0.16),
@@ -239,21 +223,13 @@ class _StatsPageState extends State<StatsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            '주간 자세 통계',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        _legendMini(),
-                      ],
-                    ),
+                    Row(children: [
+                      const Expanded(child: Text('주간 자세 통계', style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600))),
+                      _legendMini()
+                    ]),
                     const SizedBox(height: 12),
                     SizedBox(height: 240, child: _StackedWeeklyBarChart()),
                   ],
@@ -261,7 +237,7 @@ class _StatsPageState extends State<StatsPage> {
               ),
               const SizedBox(height: 20),
 
-              // ── 카드 3: 월별 트렌드 ──
+              // 월별 트렌드
               RectCard(
                 elevated: true,
                 outlineColor: Colors.white.withOpacity(0.16),
@@ -269,21 +245,14 @@ class _StatsPageState extends State<StatsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            '연간 월별 자세 추이',
-                            style: TextStyle(
+                    Row(children: [
+                      const Expanded(
+                          child: Text('연간 월별 자세 추이', style: TextStyle(
                               color: Colors.white,
                               fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        _legendMini(),
-                      ],
-                    ),
+                              fontWeight: FontWeight.w600))),
+                      _legendMini()
+                    ]),
                     const SizedBox(height: 12),
                     SizedBox(height: 240, child: _MonthlyTrendChart()),
                   ],
@@ -313,16 +282,16 @@ class _StatsPageState extends State<StatsPage> {
     );
   }
 
-  // ── CHARTS ───────────────────────────────────────────────────────────────────
+  // CHARTS
   Widget _AveragePieChart() {
-    if (_daily.isEmpty) {
+    if (_dailyMins.isEmpty) {
       return const Center(child: Text('데이터 없음', style: _label));
     }
 
     int totalGood = 0;
     int totalBad = 0;
-    for (final s in _daily) {
-      if (s.validPosture) {
+    for (final s in _dailyMins) {
+      if (s.validPosture == true) {
         totalGood += s.durationSeconds;
       } else {
         totalBad += s.durationSeconds;
@@ -361,31 +330,25 @@ class _StatsPageState extends State<StatsPage> {
   }
 
   Widget _StackedWeeklyBarChart() {
-    if (_weekly.isEmpty) {
+    if (_weeklyDays.isEmpty) {
       return const Center(child: Text('데이터 없음', style: _label));
     }
 
-    // 일(0)~토(6) 누적 (초)
+    // 일(0)~토(6) 누적(초) — day 집계의 분 단위 “개수”를 초로 환산(*60)
     final dayWise = List.generate(7, (_) => {'good': 0, 'bad': 0});
-    for (final s in _weekly) {
-      final w = s.startAt.weekday % 7; // Mon=1..Sun=7 -> 1..6,0(일)
-      if (s.validPosture) {
-        dayWise[w]['good'] = dayWise[w]['good']! + s.durationSeconds;
-      } else {
-        dayWise[w]['bad'] = dayWise[w]['bad']! + s.durationSeconds;
-      }
+    for (final d in _weeklyDays) {
+      final w = d.statDate.weekday % 7; // Mon=1..Sun=7 -> 1..6,0
+      dayWise[w]['good'] = dayWise[w]['good']! + d.goodCount * 60;
+      dayWise[w]['bad'] = dayWise[w]['bad']! + d.badCount * 60;
     }
 
-    final hasData = dayWise.any((d) =>
-    (d['good'] ?? 0) > 0 || (d['bad'] ?? 0) > 0);
-    if (!hasData) {
-      return const Center(child: Text('데이터 없음', style: _label));
-    }
+    final hasData = dayWise.any((e) =>
+    (e['good'] ?? 0) > 0 || (e['bad'] ?? 0) > 0);
+    if (!hasData) return const Center(child: Text('데이터 없음', style: _label));
 
-    // ✅ 오늘을 맨 오른쪽(인덱스 6)에 두기 위해 왼쪽으로 (오늘+1)칸 회전
     final todayIdx = DateTime
         .now()
-        .weekday % 7; // 0=일 ... 6=토
+        .weekday % 7; // 0=일..6=토
     final shift = (todayIdx + 1) % 7;
     const baseLabels = ['일', '월', '화', '수', '목', '금', '토'];
     final rotatedLabels = _rotateLeft(baseLabels, shift);
@@ -430,7 +393,7 @@ class _StatsPageState extends State<StatsPage> {
                 handleBuiltInTouches: false,
                 touchCallback: (event, response) {
                   if (event is FlTapUpEvent && response?.spot != null) {
-                    final i = response!.spot!.touchedBarGroupIndex; // 회전 후 인덱스
+                    final i = response!.spot!.touchedBarGroupIndex;
                     setState(() {
                       if (_touchedWeekIndex == i) {
                         _touchedWeekIndex = null;
@@ -481,41 +444,31 @@ class _StatsPageState extends State<StatsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Builder(builder: (_) {
-                      // ✅ 회전 후 인덱스를 실제 요일 인덱스로 역매핑
                       final actualIdx = (_touchedWeekIndex! + shift) % 7;
-                      final dateText = DateFormat('M월 d일').format(
-                          _dateForWeekIndex(actualIdx));
-                      return Text(
-                        '$dateText 통계',
-                        style: const TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.bold),
-                      );
+                      final dateText =
+                      DateFormat('M월 d일').format(_dateForWeekIndex(actualIdx));
+                      return Text('$dateText 통계',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold));
                     }),
                     const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        const Icon(Icons.square, color: errorRed, size: 10),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            _formatDuration(_touchedWeekBad),
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        const Icon(Icons.square, color: primaryBlue, size: 10),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            _formatDuration(_touchedWeekGood),
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      ],
-                    ),
+                    Row(children: [
+                      const Icon(Icons.square, color: errorRed, size: 10),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(_formatDuration(_touchedWeekBad),
+                            style: const TextStyle(color: Colors.white)),
+                      ),
+                    ]),
+                    Row(children: [
+                      const Icon(Icons.square, color: primaryBlue, size: 10),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(_formatDuration(_touchedWeekGood),
+                            style: const TextStyle(color: Colors.white)),
+                      ),
+                    ]),
                   ],
                 ),
               ),
@@ -525,57 +478,50 @@ class _StatsPageState extends State<StatsPage> {
     });
   }
 
-// ── CHART: 월별 트렌드 ───────────────────────────────────────────
   Widget _MonthlyTrendChart() {
-    if (_monthly.isEmpty) {
+    if (_monthlyDays.isEmpty) {
       return const Center(child: Text('데이터 없음', style: _label));
     }
 
-    // 월별 누적(초) — 기본 순서: 1월..12월
+    // 최근 12개월 Year-Month 버킷 고정 (왼→오: 오래된→현재달)
+    final now = DateTime.now();
+    final months = List.generate(
+        12, (i) => DateTime(now.year, now.month - 11 + i, 1));
+    final labels = months.map((d) => '${d.month}월').toList();
+
+    // 월별 누적(초) — day 집계의 분 단위 "개수"를 초로 환산(*60)
     final List<int> goodSec = List.filled(12, 0);
     final List<int> badSec = List.filled(12, 0);
 
-    for (final s in _monthly) {
-      final mIdx = s.startAt.month - 1; // 0~11
-      if (s.validPosture) {
-        goodSec[mIdx] += s.durationSeconds;
-      } else {
-        badSec[mIdx] += s.durationSeconds;
-      }
+    for (final d in _monthlyDays) {
+      final ym = DateTime(d.statDate.year, d.statDate.month, 1);
+      final idx = months.indexWhere((m) =>
+      m.year == ym.year && m.month == ym.month);
+      if (idx == -1) continue;
+
+      goodSec[idx] += d.goodCount * 60;
+      badSec[idx] += d.badCount * 60;
     }
 
-    // 회전: 왼쪽=다음달, 오른쪽=현재달
-    final now = DateTime.now();
-    final shift = now.month % 12;
-    final List<String> labels = List.generate(12, (i) => '${i + 1}월');
-
-    final rotatedLabels = _rotateLeft(labels, shift);
-    final rotatedGoodSec = _rotateLeft(goodSec, shift);
-    final rotatedBadSec = _rotateLeft(badSec, shift);
-
-    // 데이터 존재 여부 (전체가 0이면 차트 숨김)
-    final hasGood = rotatedGoodSec.any((v) => v > 0);
-    final hasBad = rotatedBadSec.any((v) => v > 0);
+    final hasGood = goodSec.any((v) => v > 0);
+    final hasBad = badSec.any((v) => v > 0);
     if (!hasGood && !hasBad) {
       return const Center(child: Text('데이터 없음', style: _label));
     }
 
-    // ✅ spots 만들 때 0인 달은 추가하지 않음 (0선/0점 제거)
+    // 0값은 점 생략
     final goodSpots = <FlSpot>[];
     final badSpots = <FlSpot>[];
     for (int i = 0; i < 12; i++) {
-      final g = rotatedGoodSec[i];
-      final b = rotatedBadSec[i];
-      if (g > 0) goodSpots.add(FlSpot(i.toDouble(), g / 3600.0));
-      if (b > 0) badSpots.add(FlSpot(i.toDouble(), b / 3600.0));
+      if (goodSec[i] > 0) goodSpots.add(
+          FlSpot(i.toDouble(), goodSec[i] / 3600.0));
+      if (badSec[i] > 0) badSpots.add(FlSpot(i.toDouble(), badSec[i] / 3600.0));
     }
 
-    // 시리즈: 데이터 있는 것만
     final List<LineChartBarData> bars = [];
     if (goodSpots.isNotEmpty) {
       bars.add(LineChartBarData(
         isCurved: false,
-        // 오버슈팅 방지
         color: primaryBlue,
         barWidth: 3,
         dotData: FlDotData(show: true),
@@ -611,7 +557,6 @@ class _StatsPageState extends State<StatsPage> {
               minX: 0,
               maxX: 11,
               minY: 0,
-              // 음수로 안 내려가게
               gridData: FlGridData(show: false),
               borderData: FlBorderData(show: false),
               titlesData: FlTitlesData(
@@ -620,7 +565,7 @@ class _StatsPageState extends State<StatsPage> {
                     showTitles: true, interval: 1,
                     getTitlesWidget: (v, _) {
                       final i = v.toInt().clamp(0, 11);
-                      return Text(rotatedLabels[i], style: _label.copyWith(
+                      return Text(labels[i], style: _label.copyWith(
                           fontSize: 10));
                     },
                   ),
@@ -648,8 +593,8 @@ class _StatsPageState extends State<StatsPage> {
                         _touchedMonthBad = 0;
                       } else {
                         _touchedMonth = idx;
-                        _touchedMonthGood = rotatedGoodSec[idx];
-                        _touchedMonthBad = rotatedBadSec[idx];
+                        _touchedMonthGood = goodSec[idx];
+                        _touchedMonthBad = badSec[idx];
                       }
                     });
                   }
@@ -675,22 +620,20 @@ class _StatsPageState extends State<StatsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('${rotatedLabels[_touchedMonth!]} 통계',
+                    Text('${labels[_touchedMonth!]} 통계',
                         style: const TextStyle(
                             color: Colors.white, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 6),
                     Row(children: [
                       const Icon(Icons.square, color: errorRed, size: 10),
                       const SizedBox(width: 6),
-                      Expanded(child: Text(
-                          _formatDuration(rotatedBadSec[_touchedMonth!]),
+                      Expanded(child: Text(_formatDuration(_touchedMonthBad),
                           style: const TextStyle(color: Colors.white))),
                     ]),
                     Row(children: [
                       const Icon(Icons.square, color: primaryBlue, size: 10),
                       const SizedBox(width: 6),
-                      Expanded(child: Text(
-                          _formatDuration(rotatedGoodSec[_touchedMonth!]),
+                      Expanded(child: Text(_formatDuration(_touchedMonthGood),
                           style: const TextStyle(color: Colors.white))),
                     ]),
                   ],
