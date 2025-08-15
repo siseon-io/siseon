@@ -15,6 +15,8 @@
 #include <sdbus-c++/sdbus-c++.h>
 #include <mqtt/async_client.h>
 #include <nlohmann/json.hpp>
+#include <fstream>
+#include <iomanip>
 
 static constexpr int QOS = 1;
 using namespace std::chrono_literals;
@@ -74,6 +76,18 @@ public:
                     std::string profileId = j["profile_id"];
                     // RCLCPP_INFO(get_logger(), "📋 Profile ID 수신: %s", profileId.c_str());
                     currentProfileId_ = profileId;
+
+                    // profile.json에 저장
+                    json profile_json;
+                    profile_json["profile_id"] = profileId;
+                    std::ofstream o("/home/b101/chj/S13P11B101/iot/ros2_ws/profile.json");
+                    if (o.is_open()) {
+                        o << std::setw(4) << profile_json << std::endl;
+                        o.close();
+                        RCLCPP_INFO(get_logger(), "💾 Profile ID를 profile.json에 저장했습니다: %s", profileId.c_str());
+                    } else {
+                        RCLCPP_ERROR(get_logger(), "❌ profile.json 파일을 열 수 없습니다.");
+                    }
                 } else {
                     // RCLCPP_WARN(get_logger(), "⚠️ JSON에 profile_id 필드가 없습니다");
                 }

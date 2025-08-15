@@ -2,7 +2,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/string.hpp>
-#include <geometry_msgs/msg/point.hpp>
+#include <nlohmann/json.hpp>
 
 #include <sdbus-c++/sdbus-c++.h>
 #include <chrono>
@@ -144,8 +144,8 @@ public:
             "/mac_addr", 10,
             std::bind(&ManualBTNode::macCallback, this, std::placeholders::_1));
 
-        // 2. /manual_pose 토픽 퍼블리셔 생성
-        pose_pub_ = this->create_publisher<geometry_msgs::msg::Point>("/manual_pose", 10);
+        // 2. /manual_pose 토픽 퍼블리셔 생성 (String으로 변경)
+        pose_pub_ = this->create_publisher<std_msgs::msg::String>("/manual_pose", 10);
 
         // 3. D-Bus 연결 및 GATT 애플리케이션 등록
         try {
@@ -184,24 +184,30 @@ public:
 
     // GattCharacteristic이 호출할 데이터 발행 함수
     void publishPose(const std::vector<uint8_t>& data) {
-        // 데이터 포맷: x(float, 4바이트), y(float, 4바이트), z(float, 4바이트) = 총 12바이트
+        // 데이터 포맷: x(1바이트), y(1바이트), z(1바이트) = 총 3바이트
         if (data.size() < 3) {
-            RCLCPP_WARN(this->get_logger(), "수신 데이터가 너무 짧습니다 (12바이트 필요). Size: %zu", data.size());
+            RCLCPP_WARN(this->get_logger(), "수신 데이터가 너무 짧습니다 (3바이트 필요). Size: %zu", data.size());
             return;
         }
 
-        geometry_msgs::msg::Point point_msg;
-        
-        // 바이트 배열에서 float 값을 추출
+        // 바이트 배열에서 값을 추출
         float x = static_cast<float>(static_cast<int8_t>(data[0]));
         float y = static_cast<float>(static_cast<int8_t>(data[1]));
         float z = static_cast<float>(static_cast<int8_t>(data[2]));
-        point_msg.x = x; point_msg.y = y; point_msg.z = z;
-        // /manual_pose 토픽으로 발행
-        pose_pub_->publish(point_msg);
 
-        RCLCPP_INFO(this->get_logger(), "GATT 데이터 수신 및 발행: [x: %.3f, y: %.3f, z: %.3f]",
-                    point_msg.x, point_msg.y, point_msg.z);
+        // JSON 문자열 생성
+        nlohmann::json json_data;
+        json_data["x"] = x;
+        json_data["y"] = y;
+        json_data["z"] = z;
+
+        std_msgs::msg::String string_msg;
+        string_msg.data = json_data.dump();
+
+        // /manual_pose 토픽으로 발행
+        pose_pub_->publish(string_msg);
+
+        // RCLCPP_INFO(this->get_logger(), "GATT 데이터 수신 및 발행: [x: %.3f, y: %.3f, z: %.3f]", x, y, z);
     }
 
 private:
@@ -234,7 +240,7 @@ private:
 
     // 멤버 변수
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr mac_sub_;
-    rclcpp::Publisher<geometry_msgs::msg::Point>::SharedPtr pose_pub_;
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pose_pub_;
 
     std::string target_mac_;
 
@@ -272,9 +278,9 @@ void GattCharacteristic::WriteValue(
     for (auto b : value) {
         oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(b) << ' ';
     }
-    RCLCPP_INFO(rclcpp::get_logger("gatt_server"),
-                "WriteValue 호출, 수신 데이터: [%s]",
-                oss.str().c_str());
+    // RCLCPP_INFO(rclcpp::get_logger("gatt_server"),
+    //             "WriteValue 호출, 수신 데이터: [%s]",
+    //             oss.str().c_str());
 
     // 내부 값 갱신
     characteristic_value_ = value;
