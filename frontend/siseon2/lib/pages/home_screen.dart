@@ -1,13 +1,14 @@
 // lib/pages/home_screen.dart
 import 'dart:async';
-import 'dart:convert'; // ← mojibake 복구에 사용
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart'; // ✅ 모드 저장/복원 (프로필별)
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:siseon2/models/control_mode.dart';
 import 'package:siseon2/models/slot_data.dart';
@@ -51,23 +52,37 @@ class HomeScreen extends StatefulWidget {
 }
 
 class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  // Colors
+  // THEME
   static const Color primaryBlue = Color(0xFF3B82F6);
   static const Color backgroundBlack = Color(0xFF0D1117);
   static const Color headerGrey = Color(0xFF161B22);
-  static const Color cardGrey = Color(0xFF1E293B);
   static const Color errorRed = Color(0xFFF87171);
 
   static const double _rightCardHeight = 64.0;
   static const double _rightGap = 8.0;
   static const double _sectionIconSize = 18;
 
+  // 프로필 아바타 강제새로고침 버전
+  int _avatarBust = 0;
+
+  // 한번만 수행 가드
+  bool _profileCheckScheduled = false;
+  bool _deviceCheckScheduled = false;
+
+  // 아바타 provider
   ImageProvider? _avatarProvider(dynamic src) {
     final s = (src ?? '').toString().trim();
     if (s.isEmpty) return null;
-    if (s.startsWith('http')) return NetworkImage(s);
-    if (s.startsWith('assets/')) return AssetImage(s);
-    return null; // 규격 밖이면 기본 아이콘 유지
+
+    if (s.startsWith('http://') || s.startsWith('https://')) {
+      final sep = s.contains('?') ? '&' : '?';
+      final withBust = _avatarBust > 0 ? '$s${sep}v=$_avatarBust' : s;
+      return NetworkImage(withBust);
+    }
+    if (s.startsWith('assets/')) {
+      return AssetImage(s);
+    }
+    return null;
   }
 
   Map<String, dynamic>? _profile;
@@ -79,7 +94,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _deviceSerial;
   String? _targetCharUuid;
 
-  // BLE session snapshot (UI 표시용)
+  // BLE session snapshot
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _writableChar;
 
@@ -88,7 +103,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   int _goodSecToday = 0;
   int _badSecToday = 0;
 
-  // ⬇️ 폴링(1분) & 로딩상태
+  // 폴링
   Timer? _pollTimer;
   bool _isPolling = false;
 
@@ -96,8 +111,11 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _loadingPosture = false;
   PostureBannerStatus _postureStatus = PostureBannerStatus.none;
 
-  // 🔹 배너용: 최신 나쁜자세 라벨들
+  // 최신 나쁜자세 라벨들
   List<String> _badLabels = [];
+
+  // ✅ 현재 활성화(적용)된 프리셋 ID (모드가 preset일 때만 하이라이트)
+  int? _activePresetId;
 
   bool get _bleReady => bleSession.isReady;
 
@@ -114,14 +132,14 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this); // 라이프사이클 감시
+    WidgetsBinding.instance.addObserver(this);
     _mode = widget.currentMode;
     FlutterBluePlus.setLogLevel(LogLevel.none);
     _initPermissions();
     _checkBluetoothState();
     _syncProfileAndDevice();
-    _loadLatestPosture(); // 첫 로딩은 스피너 보임
-    _startPolling(); // 1분 폴링 시작
+    _loadLatestPosture();
+    _startPolling();
 
     bleSession.addListener(_onBleSessionChanged);
     _copyFromSession();
@@ -149,11 +167,13 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  // 앱 라이프사이클: 복귀 시 즉시 새로고침, 백그라운드 시 폴링 중단
+  // 앱 라이프사이클
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _refreshSilently();
+      _checkCachedProfileOnce();
+      _checkCachedDeviceOnce();
       _startPolling();
     } else if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive ||
@@ -164,9 +184,11 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   void _startPolling() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+    _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
       if (!mounted) return;
-      _refreshSilently();
+      await _refreshSilently();
+      _checkCachedProfileOnce();
+      _checkCachedDeviceOnce();
     });
   }
 
@@ -179,25 +201,58 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (_isPolling) return;
     _isPolling = true;
     try {
-      await _loadLatestPosture(silent: true); // 스피너 없이
-      await _loadDailyStats(); // 오늘 통계도 갱신
+      await _loadLatestPosture(silent: true);
+      await _loadDailyStats();
+      _checkCachedProfileOnce();
+      _checkCachedDeviceOnce();
     } finally {
       _isPolling = false;
     }
   }
 
-  // ───────────── 공용 헬퍼: 프로필별 모드 키 ─────────────
+  // ───────────── 키 유틸 ─────────────
   String? _modeKeyForCurrentProfile() {
     final pid = _profile?['id'];
     if (pid == null) return null;
     return 'mode:profile:$pid';
   }
 
-  // ✅ 외부에서 모드 동기화만 (발행 없음) + 프로필별 저장
+  String? _activePresetKeyForProfile() {
+    final pid = _profile?['id'];
+    if (pid == null) return null;
+    return 'active_preset:profile:$pid';
+  }
+
+  Future<void> _persistActivePreset(int? id) async {
+    final key = _activePresetKeyForProfile();
+    if (key == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (id == null) {
+      await prefs.remove(key);
+    } else {
+      await prefs.setInt(key, id);
+    }
+  }
+
+  Future<void> _restoreActivePreset() async {
+    final key = _activePresetKeyForProfile();
+    if (key == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() => _activePresetId = prefs.getInt(key));
+  }
+
+  // 외부에서 모드 동기화 (발행 없음)
   void setModeLocal(ControlMode newMode) {
     if (_mode == newMode) return;
-    setState(() => _mode = newMode);
-    _persistMode(newMode); // 프로필별 저장
+    setState(() {
+      _mode = newMode;
+      // preset 모드가 아니면 하이라이트 해제
+      if (newMode != ControlMode.preset) {
+        _activePresetId = null;
+      }
+    });
+    _persistMode(newMode);
     widget.onModeChange(newMode);
   }
 
@@ -225,14 +280,14 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _syncProfileAndDevice() async {
     final profile = await ProfileCacheService.loadProfile();
 
-    // 프로필 전환 직후: 로딩 동안 이전 프로필 모드가 비치지 않도록 즉시 OFF 표기
     setState(() {
       _profile = profile;
       _deviceStateReady = false;
       _isDeviceRegistered = false;
       _deviceSerial = null;
       _targetCharUuid = null;
-      _mode = ControlMode.off; // 임시 OFF
+      _mode = ControlMode.off;
+      _activePresetId = null;
     });
 
     await _loadProfileAndPresets();
@@ -249,6 +304,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         _deviceSerial = null;
         _targetCharUuid = null;
         _deviceStateReady = true;
+        _activePresetId = null;
       });
       setModeLocal(ControlMode.off);
       return;
@@ -263,12 +319,14 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           device?['charUuid'] ??
           device?['characteristicUuid'];
       _deviceStateReady = true;
+      if (!_isDeviceRegistered) _activePresetId = null;
     });
 
     if (!_isDeviceRegistered) {
       setModeLocal(ControlMode.off);
     } else {
-      await _restoreModeForProfile(); // 프로필별 복원 (발행 없음)
+      await _restoreModeForProfile();
+      await _restoreActivePreset(); // ✅ 프로필별 활성 프리셋 복원
     }
   }
 
@@ -280,6 +338,67 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() {
       _profile = profile;
       _presets = presets.take(3).toList();
+      _avatarBust = DateTime.now().millisecondsSinceEpoch;
+    });
+    // 프로필 바뀌었을 수도 있으니 활성 프리셋 복원 시도
+    await _restoreActivePreset();
+  }
+
+  // 홈이 보일 때 로컬 캐시 프로필 변경 반영
+  void _checkCachedProfileOnce() {
+    if (_profileCheckScheduled) return;
+    _profileCheckScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) async {
+      _profileCheckScheduled = false;
+      final cached = await ProfileCacheService.loadProfile();
+      if (!mounted || cached == null) return;
+
+      final newUrl = (cached['imageUrl'] ?? '').toString();
+      final oldUrl = (_profile?['imageUrl'] ?? '').toString();
+      final changed = newUrl != oldUrl || (cached['name'] != _profile?['name']);
+
+      if (changed) {
+        setState(() {
+          _profile = cached;
+          _avatarBust = DateTime.now().millisecondsSinceEpoch;
+        });
+      }
+    });
+  }
+
+  // 로컬 캐시의 디바이스 등록상태 변경 반영
+  void _checkCachedDeviceOnce() {
+    if (_deviceCheckScheduled) return;
+    _deviceCheckScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) async {
+      _deviceCheckScheduled = false;
+      final pid = _profile?['id'] as int?;
+      if (pid == null || !mounted) return;
+
+      final cached = await DeviceCacheService.loadDeviceForProfile(pid);
+      final registeredNow = cached != null;
+      final serialNow = cached?['serial'];
+      final charNow = cached?['targetCharUuid'] ??
+          cached?['charUuid'] ??
+          cached?['characteristicUuid'];
+
+      final changed = (registeredNow != _isDeviceRegistered) ||
+          (serialNow != _deviceSerial) ||
+          (charNow != _targetCharUuid);
+
+      if (changed) {
+        setState(() {
+          _isDeviceRegistered = registeredNow;
+          _deviceSerial = serialNow;
+          _targetCharUuid = charNow;
+          _deviceStateReady = true;
+        });
+        if (!registeredNow) {
+          setModeLocal(ControlMode.off);
+          _activePresetId = null;
+          _persistActivePreset(null);
+        }
+      }
     });
   }
 
@@ -340,7 +459,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return;
       }
 
-      // ✅ 통계 페이지와 동일한 minute 기준으로 조회
       final mins = await StatsService.fetchMinuteStats(
         profileId: profileId,
         period: 'daily',
@@ -356,11 +474,9 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         return;
       }
 
-      // 최신순 정렬 후, "가장 최근 minute" 하나로 현재 상태 결정
       mins.sort((a, b) => a.endAt.compareTo(b.endAt));
       final latest = mins.last;
 
-      // 유연한 valid 판정 (validPosture / valid / badReasons.valid)
       bool? isValid = latest.validPosture;
       try { final v2 = (latest as dynamic).valid; if (v2 is bool) isValid = v2; } catch (_) {}
       try {
@@ -370,7 +486,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       } catch (_) {}
 
       if (isValid == false) {
-        // ❌ 최신 분이 "나쁨": 최신 분의 summary에서 라벨 추출
         final labels = _extractBadLabels(latest);
         setState(() {
           _postureStatus = PostureBannerStatus.bad;
@@ -379,7 +494,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _loadingPosture = false;
         });
       } else if (isValid == true) {
-        // ✅ 최신 분이 "좋음"
         setState(() {
           _postureStatus = PostureBannerStatus.good;
           _postureTime   = latest.endAt.toLocal();
@@ -387,7 +501,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           _loadingPosture = false;
         });
       } else {
-        // 값이 애매하면 숨김
         setState(() {
           _postureStatus = PostureBannerStatus.none;
           _postureTime = null;
@@ -406,11 +519,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-
-
-
-
-  /// 🔹 valid 여부를 최대한 유연하게 판단 (validPosture, valid, badReasons.valid 지원)
   bool? _valid(PostureStats s) {
     try {
       final v = (s as dynamic).validPosture;
@@ -428,16 +536,13 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return null;
   }
 
-  // ===== Mojibake 복구 유틸 =====
-  // 서버가 UTF-8 바이트를 라틴1로 잘못 디코딩해 보낸 문자열을 복원
+  // Mojibake 복구
   String _fixKoreanIfGarbled(String s) {
-    final looksGarbled = RegExp(r'(Ã.|Â.|ì.|í.|ë.|ê.|°|±|²|³|¼|½|¾)')
-        .hasMatch(s) &&
+    final looksGarbled = RegExp(r'(Ã.|Â.|ì.|í.|ë.|ê.|°|±|²|³|¼|½|¾)').hasMatch(s) &&
         !RegExp(r'[가-힣]').hasMatch(s);
     if (!looksGarbled) return s;
     try {
       final repaired = utf8.decode(latin1.encode(s));
-      // 복구 후 한글이 생기면 그걸 사용
       if (RegExp(r'[가-힣]').hasMatch(repaired)) return repaired;
       return s;
     } catch (_) {
@@ -450,19 +555,14 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return fixed.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
-  /// 🔹 최신 아이템에서 badReasons.reasons[].label 또는 summary에서 라벨 추출
-  /// 🔹 최신 아이템에서 "summary"만 우선으로 라벨 추출 (각도/괄호 제거)
   List<String> _extractBadLabels(dynamic item) {
     final labels = <String>[];
 
     void _collectFromSummary(String? sum) {
       if (sum == null || sum.trim().isEmpty) return;
-      // 한글 깨짐 복구 + 공백 정리
       final fixed = _fixKoreanIfGarbled(sum).trim();
-      // 예: "거북목(148.8°), 굽은 어깨(37.3°), 등 굽음(77.5°)"
       for (final part in fixed.split(RegExp(r'\s*,\s*'))) {
         if (part.isEmpty) continue;
-        // 괄호 뒤(각도 등)는 잘라내고 이름만
         final nameOnly = part.split('(').first.trim();
         if (nameOnly.isNotEmpty) {
           labels.add(nameOnly);
@@ -470,7 +570,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     }
 
-    // 1) badReasons.summary 우선
     try {
       final br = (item as dynamic).badReasons;
       if (br != null) {
@@ -479,7 +578,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       }
     } catch (_) {}
 
-    // 2) top-level summary 보조
     if (labels.isEmpty) {
       try {
         final sum2 = (item as dynamic).summary?.toString();
@@ -487,7 +585,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       } catch (_) {}
     }
 
-    // 3) 최후 보루: reasons[].label (summary가 없을 때만)
     if (labels.isEmpty) {
       try {
         final br = (item as dynamic).badReasons;
@@ -503,10 +600,8 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       } catch (_) {}
     }
 
-    // 중복 제거
     return labels.toSet().toList();
   }
-
 
   // ─────────── 등록/스캔/연결 ───────────
   Future<void> _registerDevice() async {
@@ -514,21 +609,18 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context,
       MaterialPageRoute(builder: (_) => const DeviceRegisterPage()),
     );
-    if (result == true) {
-      final pid = _profile?['id'] as int?;
-      await _loadDeviceStateFor(pid);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ 기기 등록 완료')),
-      );
-    }
+
+    final pid = _profile?['id'] as int?;
+    await _loadDeviceStateFor(pid);
+
+    if (!mounted) return;
+    // 스낵바 제거: 성공/실패 메시지 표시 없음
+    // if (_isDeviceRegistered && (result == true)) { ... }
   }
 
   Future<void> _requestPairAndScan() async {
     if (_profile == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('❌ 프로필 정보가 없습니다.')),
-      );
+      // 스낵바 제거
       return;
     }
     if (!_isDeviceRegistered) {
@@ -551,11 +643,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (bleSession.isReady) {
       setState(_copyFromSession);
       widget.onConnect?.call(bleSession.char!);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('✅ BLE 연결 성공')),
-        );
-      }
+      // 스낵바 제거
       return;
     }
 
@@ -566,11 +654,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       });
       if (_writableChar != null) {
         widget.onConnect?.call(_writableChar!);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('✅ BLE 연결 성공')),
-          );
-        }
+        // 스낵바 제거
       }
     }
   }
@@ -596,7 +680,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (key != null) {
       s = prefs.getString(key);
     }
-    // (하위 호환) 예전 디바이스 기반 키가 있으면 한번 읽어와줌
     if (s == null && _deviceSerial != null) {
       s = prefs.getString('mode:${_deviceSerial!}');
     }
@@ -604,15 +687,13 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           (e) => e.name == s,
       orElse: () => ControlMode.off,
     );
-    setModeLocal(restored); // 발행 없이 UI만
+    setModeLocal(restored);
   }
 
   // ─────────── 미등록/미준비 가드 ───────────
   Future<bool> _requireDeviceReadyAndRegistered() async {
     if (!_deviceStateReady) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('⏳ 기기 상태 확인 중입니다. 잠시만요.')),
-      );
+      // 스낵바 제거
       return false;
     }
     if (_isDeviceRegistered) return true;
@@ -628,7 +709,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         content: const Text('이 기능을 사용하려면 먼저 기기를 등록해주세요.',
             style: TextStyle(color: Colors.white70)),
         actions: [
-          // ✅ 순서: 등록하기(왼쪽) → 취소(오른쪽)
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             child: const Text('등록하기',
@@ -654,16 +734,18 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final prev = _mode;
     if (prev == newMode) return;
     setState(() => _mode = newMode);
-    _persistMode(newMode); // 프로필별 저장
+    _persistMode(newMode);
     _publishMode(prev, newMode);
     widget.onModeChange(newMode);
+    if (newMode != ControlMode.preset) {
+      _activePresetId = null;
+      _persistActivePreset(null);
+    }
   }
 
   void _publishMode(ControlMode prev, ControlMode curr) {
     if (_profile == null || _deviceSerial == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('❌ 장치/프로필 없음: MQTT 미발행')),
-      );
+      // 스낵바 제거
       return;
     }
     final topic = '/control_mode/$_deviceSerial';
@@ -678,9 +760,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _switchToOffMode() {
     if (_profile == null) return;
     _setMode(ControlMode.off);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('🔴 OFF 모드로 전환되었습니다.')),
-    );
+    // 스낵바 제거
   }
 
   Future<void> _switchToAiMode() async {
@@ -701,7 +781,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     try {
       final token = await AuthService.getValidAccessToken();
-      await http.post(
+      final res = await http.post(
         Uri.parse('https://i13b101.p.ssafy.io/siseon/api/preset-coordinate'),
         headers: {
           'Content-Type': 'application/json',
@@ -709,32 +789,57 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         },
         body: jsonEncode({"profile_id": profileId, "preset_id": presetId}),
       );
-      _setMode(ControlMode.preset);
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        _setMode(ControlMode.preset);
+        setState(() => _activePresetId = presetId); // ✅ 하이라이트
+        _persistActivePreset(presetId);
+      } else {
+        _publishMode(prev, prev);
+        // 스낵바 제거
+      }
     } catch (_) {
       _publishMode(prev, prev);
+      // 스낵바 제거
     }
   }
 
   Future<void> _addPreset() async {
     if (_profile == null) return;
     if (_presets.length >= 3) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('❌ 프리셋은 최대 3개까지 가능합니다')),
-      );
+      // 스낵바 제거
       return;
     }
-    final profileId = _profile!['id'];
-    final created = await PresetService.createPreset('프리셋 ${_presets.length + 1}',
-        profileId, 1);
-    if (created != null) await _loadProfileAndPresets();
-  }
 
-  // ─────────── MQTT 전체 초기화(모든 prev -> off 발행) ───────────
+    final profileId = _profile!['id'];
+    final name = '프리셋 ${_presets.length + 1}';
+
+    try {
+      final created = await PresetService.createPreset(name, profileId, 1);
+      if (created != null) {
+        await _loadProfileAndPresets();
+        // 스낵바 제거
+      }
+    } on PresetSaveException catch (e) {
+      final msg = (e.code == 'no_raw_posture')
+          ? '약 10초 후 다시 시도해주세요.'
+          : e.message;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    } catch (_) {
+      // 스낵바 제거
+    }
+  }
+  Future<void> refreshFromRoot() async {
+    // 프리셋/프로필 최신화
+    await _loadProfileAndPresets();
+    // 통계/배너 등도 같이 갱신
+    await _refreshSilently();
+  }
+  // 전체 OFF 재발행
   Future<void> _resetMqttAllModes() async {
     final ok = await _requireDeviceReadyAndRegistered();
     if (!ok) return;
 
-    // 모든 모드에 대해 prev -> off 전송
     for (final prev in ControlMode.values) {
       if (prev == ControlMode.off) continue;
       _publishMode(prev, ControlMode.off);
@@ -743,9 +848,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     setModeLocal(ControlMode.off);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('🔁 MQTT 초기화: 모든 모드를 OFF로 재발행 완료')),
-    );
+    // 스낵바 제거
   }
 
   Color _getModeColor() {
@@ -794,6 +897,9 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // ─────────── UI ───────────
   @override
   Widget build(BuildContext context) {
+    _checkCachedProfileOnce();
+    _checkCachedDeviceOnce();
+
     if (_profile == null) {
       return const Scaffold(
         backgroundColor: backgroundBlack,
@@ -809,18 +915,25 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: RefreshIndicator(
           color: Colors.white,
           backgroundColor: primaryBlue,
-          onRefresh: _refreshSilently, // ⬅️ 당겨서 새로고침 -> 기존 로직 재사용
+          onRefresh: () async {
+            _checkCachedProfileOnce();
+            _checkCachedDeviceOnce();
+            await _loadProfileAndPresets();
+            final pid = _profile?['id'] as int?;
+            await _loadDeviceStateFor(pid);
+            await _refreshSilently();
+          },
           child: LayoutBuilder(
             builder: (context, constraints) {
               return SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(), // ⬅️ 내용이 짧아도 pull 동작
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 18, 16, 20),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(minHeight: constraints.maxHeight),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ⬇️ 기존 내용 그대로
+                      // 헤더
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
@@ -857,13 +970,14 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           IconButton(
                             icon: const Icon(Icons.settings, color: Colors.white),
                             onPressed: () async {
-                              final changed = await Navigator.push(
-                                  context, MaterialPageRoute(builder: (_) => const EditProfilePage()));
-                              if (changed == true) {
-                                await _loadProfileAndPresets();
-                              }
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const EditProfilePage()),
+                              );
+                              await _loadProfileAndPresets();
+                              _checkCachedProfileOnce();
                               if (!mounted) return;
-                              _refreshSilently(); // (선택) 돌아오면 즉시 한번 더 갱신
+                              await _refreshSilently();
                             },
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),
@@ -885,11 +999,13 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       _sectionHeader(
                         title: '프리셋',
                         onTap: () async {
-                          final changed = await Navigator.push(
-                              context, MaterialPageRoute(builder: (_) => const PresetPage()));
-                          if (changed == true) await _loadProfileAndPresets();
+                          await Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const PresetPage()),
+                          );
+                          await _loadProfileAndPresets();
                           if (!mounted) return;
-                          _refreshSilently(); // (선택) 복귀 즉시 갱신
+                          await _refreshSilently();
                         },
                       ),
                       const SizedBox(height: 10),
@@ -911,9 +1027,9 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
-            flex: 2,
-            child:
-            SizedBox(height: leftHeight, child: _modeStatusCardCentered())),
+          flex: 2,
+          child: SizedBox(height: leftHeight, child: _modeStatusCardCentered()),
+        ),
         const SizedBox(width: 10),
         Expanded(
           flex: 1,
@@ -931,14 +1047,49 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ],
     );
   }
+  Future<void> _showResetConfirmDialog() async {
+    final yes = await showDialog<bool>(
+      context: context,
+      barrierDismissible: true,
+      builder: (_) => AlertDialog(
+        backgroundColor: headerGrey,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text(
+          '모드 초기화',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        content: const Text(
+          '초기화 시 OFF 모드로 전환됩니다.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          // ✅ 왼쪽: 네
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              '네',
+              style: TextStyle(color: primaryBlue, fontWeight: FontWeight.w700),
+            ),
+          ),
+          // ✅ 오른쪽: 아니요
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('아니요', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
+      ),
+    );
 
+    if (yes == true) {
+      await _resetMqttAllModes(); // 실제 초기화 실행 (OFF로 전환)
+    }
+  }
   // 🔴 우상단 작은 초기화 버튼 포함
   Widget _modeStatusCardCentered() {
     return RectCard(
       bgColor: headerGrey,
       child: Stack(
         children: [
-          // 초기화 버튼 (우상단)
           Positioned(
             top: 6,
             right: 6,
@@ -948,12 +1099,11 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               child: IconButton(
                 tooltip: 'MQTT 초기화 (전체 → OFF)',
                 padding: EdgeInsets.zero,
-                onPressed: _resetMqttAllModes,
+                onPressed: _showResetConfirmDialog, // ⬅️ 바로 초기화 → 확인 다이얼로그
                 icon: const Icon(Icons.restart_alt, size: 16, color: Colors.redAccent),
               ),
             ),
           ),
-          // 본문
           Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -965,9 +1115,10 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _mode == ControlMode.off ? '전원 꺼짐' : _mode.name.toUpperCase(),
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                      color: _getModeColor(),
-                      fontSize: 26,
-                      fontWeight: FontWeight.w800),
+                    color: _getModeColor(),
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ],
             ),
@@ -1005,9 +1156,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           onTap: () async {
             await _handleDisconnect();
             if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('🔌 BLE 연결을 해제했습니다.')),
-            );
+            // 스낵바 제거
           },
           child: const Icon(Icons.bluetooth_connected,
               color: primaryBlue, size: iconSize),
@@ -1037,8 +1186,9 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         child: SizedBox(
           width: 54,
           height: 12,
-          child:
-          DecoratedBox(decoration: BoxDecoration(color: Colors.white12)),
+          child: DecoratedBox(
+            decoration: BoxDecoration(color: Colors.white12),
+          ),
         ),
       ),
     );
@@ -1054,15 +1204,13 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             SizedBox(
               width: 18,
               height: 18,
-              child:
-              CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
             ),
             SizedBox(width: 8),
             Expanded(
               child: Text(
                 '최근 자세 데이터를 불러오는 중...',
-                style:
-                TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
               ),
             ),
           ],
@@ -1081,12 +1229,16 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final title = hasLabels
         ? '${_badLabels.join(', ')}이(가) 감지됩니다.'
         : (isGood ? '올바른 자세입니다. 유지해주세요!' : '잘못된 자세입니다. 교정해주세요!');
-    final sub = hasLabels ? '자세한 통계는 통계페이지에서 확인해주세요.' : null;
+    final sub = hasLabels ? '탭하면 자세한 통계로 이동합니다.' : '탭하면 자세한 통계로 이동';
     final icon = isGood ? Icons.check_circle : Icons.error_outline;
 
     return RectCard(
       bgColor: headerGrey,
       outlineColor: isGood ? primaryBlue : errorRed,
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const StatsPage()),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -1101,16 +1253,10 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   softWrap: true,
                   overflow: TextOverflow.visible,
                   style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700),
+                      color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
                 ),
-                if (sub != null) ...[
-                  const SizedBox(height: 4),
-                  Text(sub,
-                      style:
-                      const TextStyle(color: Colors.white70, fontSize: 12)),
-                ],
+                const SizedBox(height: 4),
+                Text(sub, style: const TextStyle(color: Colors.white70, fontSize: 12)),
               ],
             ),
           ),
@@ -1119,8 +1265,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               padding: const EdgeInsets.only(right: 4.0),
               child: Text(
                 DateFormat('HH:mm').format(_postureTime!),
-                style:
-                const TextStyle(color: Colors.white70, fontSize: 12),
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
               ),
             ),
         ],
@@ -1175,8 +1320,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ? const Align(
                 alignment: Alignment.centerRight,
                 child: Text('오늘 데이터가 아직 없어요',
-                    style:
-                    TextStyle(color: Colors.white, fontSize: 13),
+                    style: TextStyle(color: Colors.white, fontSize: 13),
                     textAlign: TextAlign.right),
               )
                   : Column(
@@ -1192,8 +1336,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   _rightInfoLine('총 시간', _formatDurationKr(total)),
                   const SizedBox(height: 2),
                   const Text('탭하면 자세한 통계로 이동',
-                      style:
-                      TextStyle(color: Colors.white, fontSize: 11),
+                      style: TextStyle(color: Colors.white, fontSize: 11),
                       textAlign: TextAlign.right),
                 ],
               ),
@@ -1296,20 +1439,27 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
+  // ✅ 선택된 프리셋은 파란 테두리만 (체크 아이콘 제거)
   Widget _presetButton(String name, int presetId) {
+    final bool selected =
+        (_mode == ControlMode.preset) && (_activePresetId == presetId);
+
     return RectCard(
       bgColor: headerGrey,
-      outlineColor: Colors.white.withOpacity(0.16),
+      outlineColor: selected ? primaryBlue : Colors.white.withOpacity(0.16),
       elevated: true,
       height: 56,
       onTap: () => _handlePresetSelect(presetId),
       child: Center(
-        child: Text(name,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w600)),
+        child: Text(
+          name,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }
