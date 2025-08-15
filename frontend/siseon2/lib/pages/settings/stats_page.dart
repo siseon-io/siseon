@@ -8,6 +8,7 @@ import 'package:siseon2/services/stats_service.dart';
 import 'package:siseon2/services/profile_cache_service.dart';
 import 'package:siseon2/widgets/rect_card.dart';
 import 'dart:convert'; // 한글 깨짐 복구용(utf8/latin1)
+import 'package:siseon2/pages/daily_hour_detail_page.dart';
 
 class StatsPage extends StatefulWidget {
   const StatsPage({super.key});
@@ -57,6 +58,9 @@ class _StatsPageState extends State<StatsPage> {
   int _touchedMonthGood = 0;
   int _touchedMonthBad = 0;
 
+  // ✅ 일간 도넛(원형) 터치 상태
+  int? _touchedPie; // null=닫힘, 0=좋음, 1=나쁨
+
   // ✅ 최신 상태/시간
   _PostureStatus _latestStatus = _PostureStatus.none;
   DateTime? _latestMinuteTime;
@@ -78,6 +82,7 @@ class _StatsPageState extends State<StatsPage> {
       _error = null;
       _touchedWeekIndex = null;
       _touchedMonth = null;
+      _touchedPie = null;
       _badPages = [];
       _currentBadPage = 0;
 
@@ -320,6 +325,23 @@ class _StatsPageState extends State<StatsPage> {
       );
     }
 
+    // ▶ 자세히보기 네비 (오른쪽→왼쪽 슬라이드)
+    void _openDailyDetail() {
+      Navigator.of(context).push(
+        PageRouteBuilder(
+          transitionDuration: const Duration(milliseconds: 220),
+          pageBuilder: (_, __, ___) => DailyHourDetailPage(dailyMins: _dailyMins),
+          transitionsBuilder: (_, animation, __, child) {
+            final tween = Tween<Offset>(
+              begin: const Offset(1.0, 0.0),
+              end: Offset.zero,
+            ).chain(CurveTween(curve: Curves.easeOutCubic));
+            return SlideTransition(position: animation.drive(tween), child: child);
+          },
+        ),
+      );
+    }
+
     if (_error != null) {
       return Scaffold(
         backgroundColor: backgroundBlack,
@@ -349,207 +371,240 @@ class _StatsPageState extends State<StatsPage> {
     return Scaffold(
       backgroundColor: backgroundBlack,
       appBar: _appBar(),
-      body: RefreshIndicator(
-        color: Colors.white,
-        backgroundColor: primaryBlue,
-        onRefresh: _fetchStats, // 🔄 사용자가 당겨서 새로고침할 때만
-        child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              // ✅ 최신 minute이 "좋음"이면 파란 배너
-              if (_latestStatus == _PostureStatus.good)
-                RectCard(
-                  outlineColor: primaryBlue,
-                  padding: const EdgeInsets.all(12),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.check_circle, color: primaryBlue),
-                      const SizedBox(width: 8),
-                      const Expanded(
-                        child: Text(
-                          '올바른 자세입니다. 유지해주세요!',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
+      // ✅ 페이지 아무 곳이나 탭해도 툴팁 닫히도록 래핑
+      body: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () {
+          if (_touchedWeekIndex != null || _touchedMonth != null || _touchedPie != null) {
+            setState(() {
+              _touchedWeekIndex = null;
+              _touchedWeekGood = 0;
+              _touchedWeekBad = 0;
+              _touchedMonth = null;
+              _touchedMonthGood = 0;
+              _touchedMonthBad = 0;
+              _touchedPie = null; // ✅ 도넛 툴팁 닫기
+            });
+          }
+        },
+        child: RefreshIndicator(
+          color: Colors.white,
+          backgroundColor: primaryBlue,
+          onRefresh: _fetchStats, // 🔄 사용자가 당겨서 새로고침할 때만
+          child: SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                // ✅ 최신 minute이 "좋음"이면 파란 배너
+                if (_latestStatus == _PostureStatus.good)
+                  RectCard(
+                    outlineColor: primaryBlue,
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.check_circle, color: primaryBlue),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Text(
+                            '올바른 자세입니다. 유지해주세요!',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                            ),
                           ),
                         ),
-                      ),
-                      if (_latestMinuteTime != null)
-                        Text(_formatHM(_latestMinuteTime!),
-                            style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                    ],
+                        if (_latestMinuteTime != null)
+                          Text(_formatHM(_latestMinuteTime!),
+                              style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      ],
+                    ),
                   ),
-                ),
-              if (_latestStatus == _PostureStatus.good) const SizedBox(height: 20),
+                if (_latestStatus == _PostureStatus.good) const SizedBox(height: 20),
 
-              // ✅ 최신 minute이 "좋음"이 아닐 때만 나쁜자세 카드 노출
-              if (_latestStatus != _PostureStatus.good && _badPages.isNotEmpty)
+                // ✅ 최신 minute이 "좋음"이 아닐 때만 나쁜자세 카드 노출
+                if (_latestStatus != _PostureStatus.good && _badPages.isNotEmpty)
+                  RectCard(
+                    outlineColor: errorRed,
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // ── 헤더(고정)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.error_outline, color: errorRed),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '${_badPages.map((e) => e.name).join(', ')}이(가) 감지되었습니다.',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            Text(_formatHM(_badPages.first.timeLocal),
+                                style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+
+                        // ── 아래 밝은 회색 블록만 PageView
+                        SizedBox(
+                          height: 118,
+                          child: PageView.builder(
+                            controller: _badPageController,
+                            itemCount: _badPages.length,
+                            onPageChanged: (i) => setState(() => _currentBadPage = i),
+                            itemBuilder: (_, i) {
+                              final p = _badPages[i];
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 2),
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withOpacity(0.08),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(p.name,
+                                        style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w700)),
+                                    if (p.cue.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Text('교정 팁: ${p.cue}',
+                                          style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                                    ],
+                                    if (p.ergo.isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      Text('환경 팁: ${p.ergo}',
+                                          style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                                    ],
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        // 점 인디케이터
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: List.generate(_badPages.length, (i) {
+                            final active = i == _currentBadPage;
+                            return AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              margin: const EdgeInsets.symmetric(horizontal: 4),
+                              width: active ? 8 : 6,
+                              height: active ? 8 : 6,
+                              decoration: BoxDecoration(
+                                color: active ? primaryBlue : Colors.white24,
+                                shape: BoxShape.circle,
+                              ),
+                            );
+                          }),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (_latestStatus != _PostureStatus.good && _badPages.isNotEmpty)
+                  const SizedBox(height: 20),
+
+                // 일간 도넛
                 RectCard(
-                  outlineColor: errorRed,
-                  padding: const EdgeInsets.all(12),
+                  elevated: true,
+                  outlineColor: Colors.white.withOpacity(0.16),
+                  padding: const EdgeInsets.all(16),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ── 헤더(고정)
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.error_outline, color: errorRed),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              '${_badPages.map((e) => e.name).join(', ')}이(가) 감지되었습니다.',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                              ),
+                      Row(children: [
+                        const Expanded(
+                          child: Text(
+                            '일간 자세 비율',
+                            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        _legendMini()
+                      ]),
+                      const SizedBox(height: 12),
+                      SizedBox(height: 220, child: _AveragePieChart()),
+
+                      // 자세히 보기 버튼
+                      const SizedBox(height: 8),
+                      if (_dailyMins.isNotEmpty)
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton.icon(
+                            onPressed: _openDailyDetail,
+                            icon: const Icon(Icons.chevron_right, color: Colors.white70, size: 18),
+                            label: const Text('자세히 보기', style: TextStyle(color: Colors.white70)),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.white70,
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             ),
                           ),
-                          Text(_formatHM(_badPages.first.timeLocal),
-                              style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-
-                      // ── 아래 밝은 회색 블록만 PageView
-                      SizedBox(
-                        height: 118,
-                        child: PageView.builder(
-                          controller: _badPageController,
-                          itemCount: _badPages.length,
-                          onPageChanged: (i) => setState(() => _currentBadPage = i),
-                          itemBuilder: (_, i) {
-                            final p = _badPages[i];
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 2),
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withOpacity(0.08),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(p.name,
-                                      style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w700)),
-                                  if (p.cue.isNotEmpty) ...[
-                                    const SizedBox(height: 4),
-                                    Text('교정 팁: ${p.cue}',
-                                        style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                                  ],
-                                  if (p.ergo.isNotEmpty) ...[
-                                    const SizedBox(height: 2),
-                                    Text('환경 팁: ${p.ergo}',
-                                        style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                                  ],
-                                ],
-                              ),
-                            );
-                          },
                         ),
-                      ),
-                      const SizedBox(height: 8),
-
-                      // 점 인디케이터
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(_badPages.length, (i) {
-                          final active = i == _currentBadPage;
-                          return AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            margin: const EdgeInsets.symmetric(horizontal: 4),
-                            width: active ? 8 : 6,
-                            height: active ? 8 : 6,
-                            decoration: BoxDecoration(
-                              color: active ? primaryBlue : Colors.white24,
-                              shape: BoxShape.circle,
-                            ),
-                          );
-                        }),
-                      ),
                     ],
                   ),
                 ),
-              if (_latestStatus != _PostureStatus.good && _badPages.isNotEmpty)
                 const SizedBox(height: 20),
 
-              // 일간 도넛
-              RectCard(
-                elevated: true,
-                outlineColor: Colors.white.withOpacity(0.16),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      const Expanded(
-                        child: Text(
-                          '일간 자세 비율',
-                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                // 주간 스택 바
+                RectCard(
+                  elevated: true,
+                  outlineColor: Colors.white.withOpacity(0.16),
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        const Expanded(
+                          child: Text(
+                            '주간 자세 통계',
+                            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                          ),
                         ),
-                      ),
-                      _legendMini()
-                    ]),
-                    const SizedBox(height: 12),
-                    SizedBox(height: 220, child: _AveragePieChart()),
-                  ],
+                        _legendMini()
+                      ]),
+                      const SizedBox(height: 12),
+                      SizedBox(height: 240, child: _StackedWeeklyBarChart()),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 20),
+                const SizedBox(height: 20),
 
-              // 주간 스택 바
-              RectCard(
-                elevated: true,
-                outlineColor: Colors.white.withOpacity(0.16),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      const Expanded(
-                        child: Text(
-                          '주간 자세 통계',
-                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                // 월별 트렌드
+                RectCard(
+                  elevated: true,
+                  outlineColor: Colors.white.withOpacity(0.16),
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(children: [
+                        const Expanded(
+                          child: Text(
+                            '연간 월별 자세 추이',
+                            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                          ),
                         ),
-                      ),
-                      _legendMini()
-                    ]),
-                    const SizedBox(height: 12),
-                    SizedBox(height: 240, child: _StackedWeeklyBarChart()),
-                  ],
+                        _legendMini()
+                      ]),
+                      const SizedBox(height: 12),
+                      SizedBox(height: 240, child: _MonthlyTrendChart()),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 20),
-
-              // 월별 트렌드
-              RectCard(
-                elevated: true,
-                outlineColor: Colors.white.withOpacity(0.16),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      const Expanded(
-                        child: Text(
-                          '연간 월별 자세 추이',
-                          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-                        ),
-                      ),
-                      _legendMini()
-                    ]),
-                    const SizedBox(height: 12),
-                    SizedBox(height: 240, child: _MonthlyTrendChart()),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -593,29 +648,104 @@ class _StatsPageState extends State<StatsPage> {
       return const Center(child: Text('데이터 없음', style: _label));
     }
 
-    final goodPct = (totalGood / total * 100).toStringAsFixed(0);
-    final badPct = (totalBad / total * 100).toStringAsFixed(0);
+    String pct(int sec) => ((sec / total) * 100).toStringAsFixed(0);
 
-    return PieChart(
-      PieChartData(
-        sectionsSpace: 2,
-        centerSpaceRadius: 40,
-        sections: [
-          PieChartSectionData(
-            value: totalGood.toDouble(),
-            color: primaryBlue,
-            title: '${_formatDuration(totalGood)}\n($goodPct%)',
-            titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+    return LayoutBuilder(builder: (context, constraints) {
+      const tipW = 160.0;
+      final left = constraints.maxWidth - tipW - 8; // 오른쪽 상단 정렬
+
+      return Stack(
+        children: [
+          PieChart(
+            PieChartData(
+              sectionsSpace: 2,
+              centerSpaceRadius: 40,
+              pieTouchData: PieTouchData(
+                touchCallback: (event, response) {
+                  if (event is FlTapUpEvent) {
+                    final idx = response?.touchedSection?.touchedSectionIndex;
+                    setState(() {
+                      if (idx == null) {
+                        _touchedPie = null; // 빈 영역 → 닫기
+                      } else if (_touchedPie == idx) {
+                        _touchedPie = null; // 동일 섹션 다시 탭 → 닫기
+                      } else {
+                        _touchedPie = idx;   // 다른 섹션 → 열기
+                      }
+                    });
+                  }
+                },
+              ),
+              sections: [
+                // ✅ 내부 텍스트 제거(title: '')
+                PieChartSectionData(
+                  value: totalGood.toDouble(),
+                  color: primaryBlue,
+                  title: '',
+                ),
+                PieChartSectionData(
+                  value: totalBad.toDouble(),
+                  color: errorRed,
+                  title: '',
+                ),
+              ],
+            ),
           ),
-          PieChartSectionData(
-            value: totalBad.toDouble(),
-            color: errorRed,
-            title: '${_formatDuration(totalBad)}\n($badPct%)',
-            titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
-          ),
+
+          // ✅ 툴팁 떠 있을 때 차트 아무 곳이나 탭하면 닫히는 투명 레이어
+          if (_touchedPie != null)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () => setState(() => _touchedPie = null),
+              ),
+            ),
+
+          // ✅ 커스텀 팁(오늘 통계)
+          if (_touchedPie != null)
+            Positioned(
+              top: 8,
+              left: left,
+              child: Container(
+                width: tipW,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.85),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('오늘 통계',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    Row(children: [
+                      const Icon(Icons.square, color: errorRed, size: 10),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '나쁨: ${_formatDuration(totalBad)} (${pct(totalBad)}%)',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ]),
+                    Row(children: [
+                      const Icon(Icons.square, color: primaryBlue, size: 10),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '좋음: ${_formatDuration(totalGood)} (${pct(totalGood)}%)',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
+                    ]),
+                  ],
+                ),
+              ),
+            ),
         ],
-      ),
-    );
+      );
+    });
   }
 
   Widget _StackedWeeklyBarChart() {
@@ -674,17 +804,24 @@ class _StatsPageState extends State<StatsPage> {
                 enabled: true,
                 handleBuiltInTouches: false,
                 touchCallback: (event, response) {
-                  if (event is FlTapUpEvent && response?.spot != null) {
-                    final i = response!.spot!.touchedBarGroupIndex;
+                  if (event is FlTapUpEvent) {
+                    final i = response?.spot?.touchedBarGroupIndex;
                     setState(() {
-                      if (_touchedWeekIndex == i) {
+                      if (i == null) {
+                        // ✅ 빈 영역 탭 → 닫기
+                        _touchedWeekIndex = null;
+                        _touchedWeekGood = 0;
+                        _touchedWeekBad = 0;
+                      } else if (_touchedWeekIndex == i) {
+                        // 동일 막대 다시 탭 → 닫기
                         _touchedWeekIndex = null;
                         _touchedWeekGood = 0;
                         _touchedWeekBad = 0;
                       } else {
+                        // 다른 막대 탭 → 갱신
                         _touchedWeekIndex = i;
                         _touchedWeekGood = rotatedDayWise[i]['good']!;
-                        _touchedWeekBad = rotatedDayWise[i]['bad']!;
+                        _touchedWeekBad  = rotatedDayWise[i]['bad']!;
                       }
                     });
                   }
@@ -709,6 +846,22 @@ class _StatsPageState extends State<StatsPage> {
               }),
             ),
           ),
+
+          // ✅ 툴팁 떠 있을 때 차트 아무 곳이나 탭하면 닫히는 투명 레이어
+          if (_touchedWeekIndex != null)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () {
+                  setState(() {
+                    _touchedWeekIndex = null;
+                    _touchedWeekGood = 0;
+                    _touchedWeekBad = 0;
+                  });
+                },
+              ),
+            ),
+
           if (_touchedWeekIndex != null)
             Positioned(
               top: 8,
@@ -849,19 +1002,26 @@ class _StatsPageState extends State<StatsPage> {
                 enabled: true,
                 handleBuiltInTouches: false,
                 touchCallback: (event, response) {
-                  if (event is FlTapUpEvent &&
-                      response?.lineBarSpots != null &&
-                      response!.lineBarSpots!.isNotEmpty) {
-                    final idx = response.lineBarSpots!.first.x.toInt().clamp(0, 11);
+                  if (event is FlTapUpEvent) {
+                    final hasSpot = response?.lineBarSpots != null && response!.lineBarSpots!.isNotEmpty;
+                    final idx = hasSpot ? response!.lineBarSpots!.first.x.toInt().clamp(0, 11) : null;
+
                     setState(() {
-                      if (_touchedMonth == idx) {
+                      if (idx == null) {
+                        // ✅ 빈 영역 탭 → 닫기
+                        _touchedMonth = null;
+                        _touchedMonthGood = 0;
+                        _touchedMonthBad = 0;
+                      } else if (_touchedMonth == idx) {
+                        // 동일 포인트 다시 탭 → 닫기
                         _touchedMonth = null;
                         _touchedMonthGood = 0;
                         _touchedMonthBad = 0;
                       } else {
+                        // 다른 포인트 탭 → 갱신
                         _touchedMonth = idx;
                         _touchedMonthGood = goodSec[idx];
-                        _touchedMonthBad = badSec[idx];
+                        _touchedMonthBad  = badSec[idx];
                       }
                     });
                   }
@@ -871,6 +1031,22 @@ class _StatsPageState extends State<StatsPage> {
               lineBarsData: bars,
             ),
           ),
+
+          // ✅ 툴팁 떠 있을 때 차트 아무 곳이나 탭하면 닫히는 투명 레이어
+          if (_touchedMonth != null)
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onTap: () {
+                  setState(() {
+                    _touchedMonth = null;
+                    _touchedMonthGood = 0;
+                    _touchedMonthBad = 0;
+                  });
+                },
+              ),
+            ),
+
           if (_touchedMonth != null)
             Positioned(
               top: 8,

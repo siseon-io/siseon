@@ -1,6 +1,5 @@
 // 📁 lib/pages/settings/preset_page.dart
 import 'package:flutter/material.dart';
-import '../../main.dart'; // navigatorKey (루트 스낵바용)
 import '../../services/profile_cache_service.dart';
 import '../../services/preset_service.dart';
 
@@ -63,14 +62,8 @@ class _PresetPageState extends State<PresetPage> {
 
   // 🔵 FCM 제안: "이 자세로 저장" 실행
   Future<void> _confirmSuggestedPreset() async {
-    if (_profileId == null) {
-      _showSnackBar('❌ 프로필 정보를 찾을 수 없어요');
-      return;
-    }
-    if (_presets.length >= 3) {
-      _showSnackBar('❌ 프리셋은 최대 3개까지 가능합니다');
-      return;
-    }
+    if (_profileId == null) return;            // (알림 제거) — 조용히 반환
+    if (_presets.length >= 3) return;          // (알림 제거)
 
     final name = '프리셋 ${_presets.length + 1}';
     try {
@@ -78,46 +71,43 @@ class _PresetPageState extends State<PresetPage> {
       await PresetService.confirm(profileId: _profileId!, name: name);
       await _loadProfileAndPresets();
 
-      // 🔵 루트 컨텍스트로 스낵바(이 페이지 pop 전에 보장)
-      final rootCtx = navigatorKey.currentContext;
-      if (rootCtx != null) {
-        ScaffoldMessenger.of(rootCtx).showSnackBar(
-          const SnackBar(content: Text('✅ 프리셋이 저장되었습니다')),
-        );
-      }
-
-      // 🔵 FCM 제안으로 들어온 경우에는 바로 닫기
+      // FCM 제안으로 들어온 경우에는 바로 닫기
       if (widget.fromSuggest && mounted) {
         Navigator.pop(context, true);
         return;
       }
-
-      // 일반 진입 시엔 페이지 내부 스낵바
-      _showSnackBar('✅ "$name"으로 저장되었습니다');
-    } catch (e) {
-      _showSnackBar('❌ 저장 실패: $e');
+      // (성공 알림 제거)
+    } on PresetSaveException catch (e) {
+      // ✅ “잠시 후 다시 시도” 메시지만 유지
+      if (e.code == 'no_raw_posture') {
+        _showSnackBar('약 10초 후 다시 시도해주세요.');
+      }
+      // 그 외 코드는 조용히 무시
+    } catch (_) {
+      // (알림 제거)
     } finally {
       if (mounted) setState(() => _isConfirming = false);
     }
   }
 
   Future<void> _addPreset() async {
-    if (_profileId == null) {
-      _showSnackBar('❌ 프로필 정보를 찾을 수 없어요');
-      return;
-    }
-    if (_presets.length >= 3) {
-      _showSnackBar('❌ 프리셋은 최대 3개까지 가능합니다');
-      return;
-    }
+    if (_profileId == null) return;            // (알림 제거)
+    if (_presets.length >= 3) return;          // (알림 제거)
 
     final dummyName = '프리셋 ${_presets.length + 1}';
-    final created = await PresetService.createPreset(dummyName, _profileId!, 1);
-    if (created != null) {
-      await _loadProfileAndPresets();
-      _showSnackBar('✅ $dummyName이 추가되었습니다');
-    } else {
-      _showSnackBar('❌ 프리셋 추가 실패');
+    try {
+      final created = await PresetService.createPreset(dummyName, _profileId!, 1);
+      if (created != null) {
+        await _loadProfileAndPresets();
+        // (성공 알림 제거)
+      }
+    } on PresetSaveException catch (e) {
+      // ✅ “잠시 후 다시 시도”만 표시
+      if (e.code == 'no_raw_posture') {
+        _showSnackBar('약 10초 후 다시 시도해주세요.');
+      }
+    } catch (_) {
+      // (알림 제거)
     }
   }
 
@@ -166,18 +156,9 @@ class _PresetPageState extends State<PresetPage> {
                     child: ElevatedButton(
                       onPressed: () {
                         final value = controller.text.trim();
-                        if (value.isEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('❌ 이름을 입력해주세요')),
-                          );
-                          return;
-                        }
-                        if (value.length > 7) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('❌ 이름은 최대 7글자까지 가능합니다')),
-                          );
-                          return;
-                        }
+                        // (알림 제거) — 유효성 실패 시 아무 동작 안 함
+                        if (value.isEmpty) return;
+                        if (value.length > 7) return;
                         Navigator.pop(ctx, value);
                       },
                       style: ElevatedButton.styleFrom(
@@ -217,9 +198,8 @@ class _PresetPageState extends State<PresetPage> {
 
       if (ok) {
         await _loadProfileAndPresets();
-        _showSnackBar('✅ 프리셋 이름이 변경되었습니다');
       } else {
-        _showSnackBar('❌ 프리셋 이름 변경 실패');
+        // (알림 제거)
       }
     }
   }
@@ -288,13 +268,13 @@ class _PresetPageState extends State<PresetPage> {
       );
       if (deleted) {
         await _loadProfileAndPresets();
-        _showSnackBar('✅ 프리셋이 삭제되었습니다');
       } else {
-        _showSnackBar('❌ 프리셋 삭제 실패');
+        // (알림 제거)
       }
     }
   }
 
+  // 🔔 유일하게 허용된 알림: "약 10초 후 다시 시도해주세요."
   void _showSnackBar(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -302,6 +282,7 @@ class _PresetPageState extends State<PresetPage> {
         content: Text(message),
         behavior: SnackBarBehavior.floating,
         backgroundColor: Colors.black87,
+        duration: const Duration(seconds: 2),
       ),
     );
   }

@@ -66,8 +66,6 @@ class _ManualPageState extends State<ManualPage> {
       statusBarIconBrightness: Brightness.light,
     ));
 
-    // MQTT 연결 (내부에서 재시도)
-    // ignore: unawaited_futures
     mqttService.connect();
 
     _resolveDeviceSerial();
@@ -113,15 +111,15 @@ class _ManualPageState extends State<ManualPage> {
 
   String _bleFallbackId() {
     try {
-      return widget.writableChar.device.id.str; // 최신
+      return widget.writableChar.device.id.str;
     } catch (_) {
       try {
         // ignore: deprecated_member_use
-        return widget.writableChar.device.remoteId.str; // 구버전
+        return widget.writableChar.device.remoteId.str;
       } catch (_) {
         try {
           // ignore: deprecated_member_use
-          return widget.writableChar.remoteId.str; // 일부 버전
+          return widget.writableChar.remoteId.str;
         } catch (_) {
           try {
             return widget.writableChar.device.id.toString();
@@ -248,10 +246,11 @@ class _ManualPageState extends State<ManualPage> {
     }
   }
 
+  // 여기 범위를 -127 ~ 127로 변경
   List<int> _encodeAxes(List<int> axes) {
-    final x = axes[0].clamp(-100, 100);
-    final y = axes[1].clamp(-100, 100);
-    final z = axes[2].clamp(-100, 100);
+    final x = axes[0].clamp(-127, 127);
+    final y = axes[1].clamp(-127, 127);
+    final z = axes[2].clamp(-127, 127);
 
     switch (_fmt) {
       case PayloadFmt.i8x3:
@@ -307,12 +306,12 @@ class _ManualPageState extends State<ManualPage> {
     }
   }
 
-  // ── 조이스틱 핸들러
+  // ── 조이스틱 핸들러 (-127 ~ 127 적용)
   void _onJoystickXZ(double x, double z) {
     x = _applyDeadzone(x);
     z = _applyDeadzone(z);
-    final xi = (x * 100).round().clamp(-100, 100);
-    final zi = (z * 100).round().clamp(-100, 100);
+    final xi = (x * 127).round().clamp(-127, 127);
+    final zi = (z * 127).round().clamp(-127, 127);
     setState(() {
       _payload[0] = xi;
       _payload[2] = zi;
@@ -321,7 +320,7 @@ class _ManualPageState extends State<ManualPage> {
 
   void _onJoystickY(double y) {
     y = _applyDeadzone(y);
-    final yi = (y * 100).round().clamp(-100, 100);
+    final yi = (y * 127).round().clamp(-127, 127);
     setState(() => _payload[1] = yi);
   }
 
@@ -334,14 +333,11 @@ class _ManualPageState extends State<ManualPage> {
 
   double _applyDeadzone(double v, [double t = 0.08]) => v.abs() < t ? 0.0 : v;
 
-  // ────────────────────────────────────────────────
-  // ✅ pop 때만 발행 (1회 보장)
   Future<void> _exitWithAuto() async {
-    if (_isExiting) return; // 재진입 방지
+    if (_isExiting) return;
     _isExiting = true;
 
     try {
-      // serial 확보 안 됐으면 재시도
       if (_deviceSerial == null || _deviceSerial!.isEmpty) {
         await _resolveDeviceSerial();
       }
@@ -360,19 +356,15 @@ class _ManualPageState extends State<ManualPage> {
       }
     } finally {
       if (mounted) {
-        Navigator.pop(context, ControlMode.auto); // 결과 전달
+        Navigator.pop(context, ControlMode.auto);
       }
     }
   }
-  // ────────────────────────────────────────────────
 
   @override
   void dispose() {
     _sendTimer?.cancel();
     _connectionSub?.cancel();
-
-    // ⚠️ 여기서는 발행/Pop 하지 않음(중복 방지)
-
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.black,
       statusBarIconBrightness: Brightness.light,
@@ -382,19 +374,17 @@ class _ManualPageState extends State<ManualPage> {
 
   @override
   Widget build(BuildContext context) {
-    // Flutter 3.10+ : PopScope 권장 (WillPopScope로 바꿔도 됨)
     return PopScope(
-      canPop: false, // 우리가 직접 pop 제어
+      canPop: false,
       onPopInvoked: (didPop) async {
-        if (didPop) return; // 이미 pop된 경우
-        await _exitWithAuto(); // 여기서만 발행+pop
+        if (didPop) return;
+        await _exitWithAuto();
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF0D1117),
         body: SafeArea(
           child: Stack(
             children: [
-              // 상단 디버그 박스
               Positioned(
                 top: 16,
                 left: 16,
@@ -412,8 +402,6 @@ class _ManualPageState extends State<ManualPage> {
                   ),
                 ),
               ),
-
-              // 좌: XZ 조이스틱
               Positioned(
                 left: 28,
                 bottom: 28,
@@ -425,8 +413,6 @@ class _ManualPageState extends State<ManualPage> {
                   ),
                 ),
               ),
-
-              // 우: Y 조이스틱
               Positioned(
                 right: 28,
                 bottom: 28,
@@ -438,15 +424,12 @@ class _ManualPageState extends State<ManualPage> {
                   ),
                 ),
               ),
-
-              // 좌상단 뒤로가기 버튼 (pop은 공통 경로로)
               Positioned(
                 top: 16,
                 left: 16,
                 child: IconButton(
                   icon: const Icon(Icons.arrow_back, color: Colors.white, size: 26),
                   onPressed: () async {
-                    // 시스템 뒤로가기와 동일 경로로 유도
                     await _exitWithAuto();
                   },
                 ),

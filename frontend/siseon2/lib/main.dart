@@ -19,7 +19,10 @@ import 'package:permission_handler/permission_handler.dart';
 import '/login_screen.dart';
 import '/profile_select_screen.dart';
 
+// ✅ 전역 내비게이터 & 스낵바 키 (스낵바 줄세우기 방지용 서비스가 이 키를 사용)
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
+GlobalKey<ScaffoldMessengerState>();
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -81,6 +84,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       navigatorKey: navigatorKey,
+      scaffoldMessengerKey: scaffoldMessengerKey, // ⬅️ 전역 스낵바 키 연결 (중요)
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         fontFamily: 'Pretendard',

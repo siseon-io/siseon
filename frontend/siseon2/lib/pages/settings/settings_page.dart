@@ -370,9 +370,14 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
+// build() 안의 body 부분
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Colors.white))
           : ListView(
+        // ✅ 하단 여백: 위와 동일한 24 + 기기 하단 인셋
+        padding: EdgeInsets.only(
+          bottom: 24 + MediaQuery.of(context).padding.bottom,
+        ),
         children: [
           const SizedBox(height: 16),
           Center(
@@ -401,12 +406,12 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 24),
-        _buildMenuItem(Icons.account_circle, '프로필 변경', () {
-          Navigator.push(
-            context,
-            _slideRightToLeft(const ProfileSelectScreen(allowBack: true)),
-          );
-        }),
+          _buildMenuItem(Icons.account_circle, '프로필 변경', () {
+            Navigator.push(
+              context,
+              _slideRightToLeft(const ProfileSelectScreen(allowBack: true)),
+            );
+          }),
           _buildMenuItem(Icons.edit, '프로필 수정', () {
             Navigator.push(
               context,
@@ -432,8 +437,12 @@ class _SettingsPageState extends State<SettingsPage> {
             );
           }),
           _buildMenuItem(Icons.logout, '로그아웃', _showLogoutDialog),
+
+          // ✅ 마지막에 위와 동일한 여백 추가
+          const SizedBox(height: 24),
         ],
       ),
+
     );
   }
 }

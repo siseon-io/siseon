@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart'; // ✅ 진행중 상태 저장
+import 'package:http/http.dart' as http; // ✅ 삭제 API 호출
+import 'package:siseon2/services/auth_service.dart'; // ✅ 토큰 획득
 
 import 'package:siseon2/services/chat_api.dart';
 import 'package:siseon2/models/chat_models.dart';
@@ -41,6 +43,7 @@ class _ChatbotPageState extends State<ChatbotPage> {
   final ChatApi _api = ChatApi();
   bool _loading = true;
   bool _sending = false; // ✅ 답변 올 때까지 전송 금지
+  bool _deleting = false; // ✅ 삭제 중 중복 방지
 
   // 타이핑 인디케이터 상태
   bool _assistantTyping = false;
@@ -360,6 +363,111 @@ class _ChatbotPageState extends State<ChatbotPage> {
     }
   }
 
+  // ─────────────────────────────────────────────
+  // 전체 삭제: 확인 다이얼로그 → DELETE API → 정리
+  // ─────────────────────────────────────────────
+  Future<void> _confirmAndDelete() async {
+    if (_deleting) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: rootBackground,
+        title: const Text('대화 전체 삭제', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          '이 프로필의 모든 채팅 기록이 영구 삭제됩니다. 진행할까요?',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          // ⬅️ 왼쪽: 삭제(확정)
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('삭제',
+                style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w700)),
+          ),
+          // ➡️ 오른쪽: 취소
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('취소', style: TextStyle(color: Colors.white70)),
+          ),
+        ],
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+    );
+
+    if (ok != true) return;
+    setState(() => _deleting = true);
+
+    try {
+      final token = await AuthService.getValidAccessToken();
+      if (token == null) throw Exception('로그인이 필요합니다.');
+
+      // ✅ 후보들: ChatApi와 동일한 8000 포트 우선, 슬래시 유무 모두 시도
+      final candidates = <Uri>[
+        Uri.parse('http://i13b101.p.ssafy.io:8000/api/chat/logs/${widget.profileId}'),
+        Uri.parse('http://i13b101.p.ssafy.io:8000/api/chat/logs/${widget.profileId}/'),
+        // 게이트웨이 경로(혹시 열려 있으면 여기서도 성공할 수 있음)
+        Uri.parse('https://i13b101.p.ssafy.io/chatbot/api/chat/logs/${widget.profileId}'),
+        Uri.parse('https://i13b101.p.ssafy.io/chatbot/api/chat/logs/${widget.profileId}/'),
+      ];
+
+      Exception? lastError;
+      int? lastStatus;
+      String? lastBody;
+
+      for (final url in candidates) {
+        try {
+          final resp = await http.delete(
+            url,
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Length': '0', // 일부 프록시가 DELETE 바디를 싫어하는 경우 방지
+            },
+          );
+          if (resp.statusCode == 204) {
+            // ✅ 성공: 로컬 상태도 초기화
+            _pendingPoll?.cancel();
+            _stopTyping();
+            await _LocalChatState.clear(widget.profileId);
+            setState(() {
+              _sending = false;
+              _messages.clear();
+            });
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('대화가 모두 삭제되었습니다.')),
+              );
+            }
+            lastStatus = 204;
+            break;
+          } else {
+            lastStatus = resp.statusCode;
+            lastBody = resp.body;
+          }
+        } catch (e) {
+          lastError = e is Exception ? e : Exception(e.toString());
+        }
+      }
+
+      if (lastStatus != 204) {
+        // 모두 실패
+        if (lastError != null) {
+          throw lastError;
+        } else {
+          throw Exception('서버 응답 $lastStatus: $lastBody');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('삭제 실패: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _deleting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -373,6 +481,11 @@ class _ChatbotPageState extends State<ChatbotPage> {
             icon: const Icon(Icons.help_outline, color: Colors.white),
             tooltip: 'FAQ 바로답변',
             onPressed: _openFaqSheet,
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline, color: Colors.white),
+            tooltip: '대화 전체 삭제',
+            onPressed: (_sending || _deleting) ? null : _confirmAndDelete,
           ),
         ],
       ),
@@ -435,6 +548,7 @@ class _ChatbotPageState extends State<ChatbotPage> {
 
           SafeArea(
             top: false,
+            bottom: MediaQuery.of(context).viewInsets.bottom == 0, // 키보드 열리면 false
             child: Container(
               color: const Color(0xFF0B0F14),
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -443,28 +557,33 @@ class _ChatbotPageState extends State<ChatbotPage> {
                   Expanded(
                     child: TextField(
                       controller: _controller,
-                      enabled: !_sending, // ✅ 답변대기 중 입력 금지
+                      enabled: !_sending && !_deleting,
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
-                        hintText: _sending ? '답변을 기다리는 중…' : 'SEONY에게 물어보기…',
+                        hintText: _sending
+                            ? '답변을 기다리는 중…'
+                            : (_deleting ? '삭제 중…' : 'SEONY에게 물어보기…'),
                         hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
                         fillColor: inputBg,
                         filled: true,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        border: OutlineInputBorder(borderSide: BorderSide.none, borderRadius: BorderRadius.circular(14)),
+                        border: OutlineInputBorder(
+                          borderSide: BorderSide.none,
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
                       onSubmitted: (_) => _onSend(),
                     ),
                   ),
                   const SizedBox(width: 8),
                   IconButton(
-                    onPressed: _sending ? null : _onSend, // ✅ 대기중이면 버튼 비활성
+                    onPressed: (_sending || _deleting) ? null : _onSend,
                     icon: const Icon(Icons.send_rounded, color: Colors.white),
                   ),
                 ],
               ),
             ),
-          ),
+          )
         ],
       ),
     );
