@@ -19,6 +19,23 @@ class AppColors {
   static const textHint = Colors.white38;
 }
 
+/// ✅ 시력 입력 전용 포매터 (음수/소수 허용, 자연스러운 타이핑)
+/// - 맨 앞 '-' 0~1개 허용
+/// - 숫자와 '.' 0~1개 허용
+/// - 편집 중 공란/단일 '-'도 허용
+class _SignedDecimalFormatter extends TextInputFormatter {
+  final RegExp _regex = RegExp(r'^-?\d*\.?\d*$');
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final t = newValue.text;
+    if (t.isEmpty || t == '-' || _regex.hasMatch(t)) {
+      return newValue;
+    }
+    return oldValue;
+  }
+}
+
 class ProfileCreateScreen extends StatefulWidget {
   const ProfileCreateScreen({Key? key}) : super(key: key);
 
@@ -262,7 +279,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
       ),
       builder: (ctx) {
         final media = MediaQuery.of(ctx);
-// 기존: 0.65, 480
+        // 기존: 0.65, 480
         final sheetHeight = math.min(media.size.height * 0.40, 400.0);
         return SizedBox(
           height: sheetHeight,
@@ -282,7 +299,6 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                 ),
                 const SizedBox(height: 12),
                 // 👉 반응형 그리드
-// 기존 Expanded(child: LayoutBuilder(...)) 블록을 ↓ 이걸로 교체
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
@@ -383,8 +399,7 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
         "birthDate": _birthDate?.toIso8601String(),
         "leftVision": double.tryParse(_visionLeft),
         "rightVision": double.tryParse(_visionRight),
-        // 서버가 실제 URL을 요구한다면, 에셋 경로 대신 별도 키를 보내거나
-        // 업로드 후 URL을 보내도록 백엔드와 합의 필요
+        // 서버가 실제 URL을 요구한다면, 에셋 경로 대신 별도 키를 보내거나 업로드 후 URL을 보내도록 백엔드와 합의 필요
         "imageUrl": _selectedAvatar,
       }),
     );
@@ -500,22 +515,28 @@ class _ProfileCreateScreenState extends State<ProfileCreateScreen> {
                 Expanded(
                   child: _buildField(
                     label: '좌안 시력',
-                    hint: '예: 1.0',
+                    hint: '예: -0.75', // ✅ 힌트 업데이트
                     icon: Icons.visibility,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      signed: true,
+                      decimal: true,
+                    ), // ✅ 안드로이드 마이너스 키 등장
                     onChanged: (v) => setState(() => _visionLeft = v),
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                    inputFormatters: [_SignedDecimalFormatter()], // ✅ 음수/소수 포매터
                   ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
                   child: _buildField(
                     label: '우안 시력',
-                    hint: '예: 1.0',
+                    hint: '예: -0.75', // ✅ 힌트 업데이트
                     icon: Icons.visibility,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    keyboardType: const TextInputType.numberWithOptions(
+                      signed: true,
+                      decimal: true,
+                    ), // ✅
                     onChanged: (v) => setState(() => _visionRight = v),
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                    inputFormatters: [_SignedDecimalFormatter()], // ✅
                   ),
                 ),
               ],

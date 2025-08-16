@@ -68,8 +68,18 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   // 한번만 수행 가드
   bool _profileCheckScheduled = false;
   bool _deviceCheckScheduled = false;
-
+  bool _skipNextProfileCacheCheck = false; // ✅ 추가
   // 아바타 provider
+  Future<void> _reloadPresetsForCurrentProfile() async {
+    if (_profile == null) return;
+    final presets = await PresetService.fetchPresets(_profile!['id']);
+    if (!mounted) return;
+    setState(() {
+      _presets = presets.take(3).toList();
+      _avatarBust = DateTime.now().millisecondsSinceEpoch; // 네트워크 아바타 캐시 버스트
+    });
+  }
+
   ImageProvider? _avatarProvider(dynamic src) {
     final s = (src ?? '').toString().trim();
     if (s.isEmpty) return null;
@@ -346,6 +356,10 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   // 홈이 보일 때 로컬 캐시 프로필 변경 반영
   void _checkCachedProfileOnce() {
+    if (_skipNextProfileCacheCheck) { // ✅ 방금 수정한 값을 캐시가 되돌리지 않게 1회 차단
+      _skipNextProfileCacheCheck = false;
+      return;
+    }
     if (_profileCheckScheduled) return;
     _profileCheckScheduled = true;
     SchedulerBinding.instance.addPostFrameCallback((_) async {
@@ -970,13 +984,30 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                           IconButton(
                             icon: const Icon(Icons.settings, color: Colors.white),
                             onPressed: () async {
-                              await Navigator.push(
+                              final result = await Navigator.push<Map<String, dynamic>?>(
                                 context,
                                 MaterialPageRoute(builder: (_) => const EditProfilePage()),
                               );
-                              await _loadProfileAndPresets();
-                              _checkCachedProfileOnce();
+
                               if (!mounted) return;
+
+                              if (result != null) {
+                                // 1) 수정 결과 즉시 UI 반영
+                                setState(() {
+                                  _profile = result;
+                                  _avatarBust = DateTime.now().millisecondsSinceEpoch; // 아바타 버스트
+                                });
+
+                                // 2) 프리셋만 최신화 (프로필은 다시 캐시에서 읽지 않음)
+                                await _reloadPresetsForCurrentProfile();
+
+                                // 3) 캐시 동기화 체크가 방금 값 덮어쓰지 않도록 1회 스킵
+                                _skipNextProfileCacheCheck = true;
+                              } else {
+                                // 결과를 안 주는 페이지라면, 기존 경로로(캐시 의존)
+                                await _loadProfileAndPresets();
+                              }
+
                               await _refreshSilently();
                             },
                             padding: EdgeInsets.zero,

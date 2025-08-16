@@ -1,9 +1,11 @@
+// lib/services/mqtt_service.dart
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_server_client.dart';
+import 'package:siseon2/services/device_cache_service.dart';
 
 class MqttService {
   static final MqttService _instance = MqttService._internal();
@@ -50,7 +52,7 @@ class MqttService {
           .startClean();
 
       print("🟢 MQTT Connect 시도: username=$username");
-      await client.connect(username, password); // ✅ 환경변수에서 불러옴
+      await client.connect(username, password);
     } catch (e) {
       print('❌ MQTT 연결 실패: $e');
       client.disconnect();
@@ -59,14 +61,29 @@ class MqttService {
     }
   }
 
-  void onConnected() => print('✅ MQTT 연결 성공');
+  // 연결 성공 시 deviceSerial 기반으로 자동 구독
+  Future<void> onConnected() async {
+    print('✅ MQTT 연결 성공');
+    try {
+      final device = await DeviceCacheService.loadDevice();
+      final serial = device?['serial']?.toString();
+      if (serial != null && serial.isNotEmpty) {
+        subscribe('/control_mode/$serial');
+      } else {
+        print('⚠️ 구독 실패: deviceSerial 없음');
+      }
+    } catch (e) {
+      print('⚠️ 구독 시 deviceSerial 로드 실패: $e');
+    }
+  }
+
   void onDisconnected() => print('❌ MQTT 연결 끊김');
   void onSubscribed(String topic) => print('📌 구독 성공: $topic');
 
   void publish(String topic, Map<String, dynamic> payload) async {
     if (client.connectionStatus?.state != MqttConnectionState.connected) {
       print('⚠️ MQTT 연결 안 됨: 재연결 시도');
-      await connect(); // ✅ 자동 재연결
+      await connect();
     }
 
     if (client.connectionStatus?.state == MqttConnectionState.connected) {
@@ -78,7 +95,6 @@ class MqttService {
       print('❌ MQTT 발행 실패: 연결 불가');
     }
   }
-
 
   void subscribe(String topic) {
     if (client.connectionStatus?.state == MqttConnectionState.connected) {

@@ -44,6 +44,15 @@ class _RootScreenState extends State<RootScreen> {
   static const double _fabSize = 60;
   static const double _notchMargin = 4;
 
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(msg)),
+      );
+  }
   @override
   void initState() {
     super.initState();
@@ -166,7 +175,6 @@ class _RootScreenState extends State<RootScreen> {
   void _goToSettingsPage() => setState(() => _currentIndex = 2);
 
   void _handleAiModeFromHome() {
-    // 스낵바 제거: 단순 모드 동기화만 수행
     _homeKey.currentState?.setModeExternal(ControlMode.auto);
   }
 
@@ -219,7 +227,6 @@ class _RootScreenState extends State<RootScreen> {
 
   Future<bool> _requireDeviceRegistered() async {
     if (_profileId == null) {
-      // 스낵바 제거: 바로 실패 처리
       return false;
     }
 
@@ -262,7 +269,6 @@ class _RootScreenState extends State<RootScreen> {
       await Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceRegisterPage()));
       if (result == true) {
         await _ensureDeviceSerialWithFallback();
-        // 스낵바 제거
         return true;
       }
     }
@@ -286,7 +292,6 @@ class _RootScreenState extends State<RootScreen> {
       }
       return true;
     } catch (_) {
-      // 스낵바 제거: 실패 시 조용히 false 반환
       return false;
     }
   }
@@ -300,7 +305,6 @@ class _RootScreenState extends State<RootScreen> {
         : (_writableChar != null ? _deviceIdFromChar(_writableChar!) : '');
 
     if (serial.isEmpty) {
-      // 스낵바 제거
       return;
     }
 
@@ -312,7 +316,8 @@ class _RootScreenState extends State<RootScreen> {
 
   Future<void> _handleManualTap() async {
     if (_profileId == null) {
-      // 스낵바 제거
+      // 프로필 없을 때는 조용히 무시하거나 필요하면 안내
+      // _snack('프로필을 먼저 선택/생성해주세요.');
       return;
     }
 
@@ -321,11 +326,12 @@ class _RootScreenState extends State<RootScreen> {
 
     final ch = _writableChar;
 
+    // ✅ 여기 추가: BLE 미연결 시 안내
     if (ch == null || !(await _isCharConnected(ch))) {
       _devStateSub?.cancel();
       _devStateSub = null;
       setState(() => _writableChar = null);
-      // 스낵바 제거
+      _snack('블루투스를 먼저 연결해주세요.');
       return;
     }
 
@@ -334,7 +340,7 @@ class _RootScreenState extends State<RootScreen> {
         : ch.remoteId.toString();
 
     if (serial.isEmpty) {
-      // 스낵바 제거
+      // _snack('기기 식별 정보를 확인할 수 없습니다.');
       return;
     }
 
@@ -383,7 +389,6 @@ class _RootScreenState extends State<RootScreen> {
               _devStateSub = null;
               if (mounted) {
                 setState(() => _writableChar = null);
-                // 스낵바 제거: 연결 끊김 알림 표시 안 함
               }
             }
           });
@@ -399,11 +404,16 @@ class _RootScreenState extends State<RootScreen> {
       const SettingsPage(),
     ];
 
-    return GestureDetector(
-      onTap: () => FocusScope.of(context).unfocus(),
+    // ✅ 전역 탭: GestureDetector → Listener 로 교체 (탭 가로채기 방지)
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: (_) {
+        final f = FocusScope.of(context);
+        if (!f.hasPrimaryFocus && f.focusedChild != null) f.unfocus();
+      },
       child: Scaffold(
         backgroundColor: rootBackground,
-        extendBody: false,
+        extendBody: true,
         resizeToAvoidBottomInset: false,
         body: IndexedStack(index: _currentIndex, children: pages),
         floatingActionButton: Transform.translate(
@@ -457,7 +467,7 @@ class _RootScreenState extends State<RootScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
                       _buildTabItem(Icons.home, '홈', 0),
-                      _buildManualTabItem(Icons.menu_book_rounded, '수동'),
+                      _buildManualTabItem(),
                       const SizedBox(width: 56),
                       _buildTabItem(Icons.chat_bubble_rounded, '챗봇', 1),
                       _buildTabItem(Icons.settings, '설정', 2),
@@ -466,16 +476,16 @@ class _RootScreenState extends State<RootScreen> {
                 ),
               ),
             ),
-            // ✅ 제스처 바(SafeArea) 구간에서 터치 흡수
+            // ✅ 제스처 바(SafeArea) 구간: GestureDetector → AbsorbPointer (경쟁 제거)
             if (extra > 0)
               Positioned(
                 left: 0,
                 right: 0,
                 bottom: 0,
                 height: extra,
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () {}, // 아무 동작 없음(터치만 소모)
+                child: AbsorbPointer(
+                  absorbing: true,
+                  child: Container(color: Colors.transparent),
                 ),
               ),
           ],
@@ -483,7 +493,6 @@ class _RootScreenState extends State<RootScreen> {
       ],
     );
   }
-
 
   Widget _buildNoProfileGate() {
     return Scaffold(
@@ -498,36 +507,44 @@ class _RootScreenState extends State<RootScreen> {
     );
   }
 
+  // ✅ 탭: GestureDetector → InkWell (안정적인 제스처 처리)
   Widget _buildTabItem(IconData icon, String label, int idx) {
     final isSelected = _currentIndex == idx;
     final color = isSelected ? primaryBlue : inactiveGrey;
-    return GestureDetector(
-      onTap: () => _selectTab(idx),
-      child: SizedBox(
-        width: 60, // 폭 축소
+    return SizedBox(
+      width: 60,
+      height: 56,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _selectTab(idx),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 24), // 아이콘 축소
-            const SizedBox(height: 3), // 간격 축소
-            Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w500)), // 폰트 축소
+            Icon(icon, color: color, size: 24),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w500),
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildManualTabItem(IconData icon, String label) {
-    return GestureDetector(
-      onTap: _handleManualTap,
-      child: SizedBox(
-        width: 60, // 폭 축소
+  Widget _buildManualTabItem() {
+    return SizedBox(
+      width: 60,
+      height: 56,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: _handleManualTap,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: const [
-            Icon(Icons.menu_book_rounded, color: inactiveGrey, size: 24), // 아이콘 축소
+            Icon(Icons.menu_book_rounded, color: inactiveGrey, size: 24),
             SizedBox(height: 3),
-            Text('수동', style: TextStyle(color: inactiveGrey, fontSize: 11, fontWeight: FontWeight.w500)), // 폰트 축소
+            Text('수동', style: TextStyle(color: inactiveGrey, fontSize: 11, fontWeight: FontWeight.w500)),
           ],
         ),
       ),

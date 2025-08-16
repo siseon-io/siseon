@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:http/http.dart' as http;
 
 import '../../../login_screen.dart';
@@ -24,6 +25,12 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _imageUrl;
   int? _selectedProfileId;
   bool _isLoading = true;
+
+  // ✅ 네트워크 아바타 캐시버스트용
+  int _avatarBust = 0;
+
+  // ✅ 화면에 보일 때 캐시 변경 한 번만 반영
+  bool _profileCheckScheduled = false;
 
   static const Color backgroundBlack = Color(0xFF0D1117);
   static const Color cardGrey = Color(0xFF161B22);
@@ -51,15 +58,33 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // ✅ 아바타 Provider (assets + http 지원, 캐시버스트)
+  ImageProvider? _avatarProvider(String? s) {
+    final v = (s ?? '').trim();
+    if (v.isEmpty) return null;
+    if (v.startsWith('http://') || v.startsWith('https://')) {
+      final sep = v.contains('?') ? '&' : '?';
+      final withBust = _avatarBust > 0 ? '$v${sep}v=$_avatarBust' : v;
+      return NetworkImage(withBust);
+    }
+    if (v.startsWith('assets/')) {
+      return AssetImage(v);
+    }
+    return null;
+  }
+
   Future<void> _loadCachedProfile() async {
     final cached = await ProfileCacheService.loadProfile();
     if (cached != null) {
       setState(() {
         _name = cached['name'];
         _imageUrl = cached['imageUrl'];
-        _selectedProfileId = cached['id'];
+        _selectedProfileId = cached['id'] ?? cached['profileId'];
         _isLoading = false;
+        _avatarBust = DateTime.now().millisecondsSinceEpoch; // 새로고침
       });
+    } else {
+      setState(() => _isLoading = false);
     }
   }
 
@@ -84,7 +109,9 @@ class _SettingsPageState extends State<SettingsPage> {
           setState(() {
             _name = selected['name'];
             _imageUrl = selected['imageUrl'];
+            _selectedProfileId = selected['id'] ?? selected['profileId'];
             _isLoading = false;
+            _avatarBust = DateTime.now().millisecondsSinceEpoch;
           });
 
           await ProfileCacheService.saveProfile(selected);
@@ -97,6 +124,30 @@ class _SettingsPageState extends State<SettingsPage> {
     } catch (_) {
       setState(() => _isLoading = false);
     }
+  }
+
+  // ✅ 화면 보일 때 캐시 변경 반영(한 프레임 뒤 1회)
+  void _checkCachedProfileOnce() {
+    if (_profileCheckScheduled) return;
+    _profileCheckScheduled = true;
+    SchedulerBinding.instance.addPostFrameCallback((_) async {
+      _profileCheckScheduled = false;
+      final cached = await ProfileCacheService.loadProfile();
+      if (!mounted || cached == null) return;
+
+      final newUrl = (cached['imageUrl'] ?? '').toString();
+      final oldUrl = (_imageUrl ?? '');
+      final changed = newUrl != oldUrl || (cached['name'] != _name);
+
+      if (changed) {
+        setState(() {
+          _name = cached['name'];
+          _imageUrl = cached['imageUrl'];
+          _selectedProfileId = cached['id'] ?? cached['profileId'];
+          _avatarBust = DateTime.now().millisecondsSinceEpoch; // 강제 새로고침
+        });
+      }
+    });
   }
 
   // ✅ 푸시 토큰 해제 API 호출
@@ -261,7 +312,6 @@ class _SettingsPageState extends State<SettingsPage> {
                         Navigator.pop(context);
 
                         await _unregisterPush(); // ✅ 푸시 등록 해제
-
                         await AuthService.clearTokens();
                         await ProfileCacheService.clearProfile();
 
@@ -350,6 +400,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    // ✅ 화면 보일 때 캐시 변경 한 번 반영
+    _checkCachedProfileOnce();
+
     return Scaffold(
       backgroundColor: backgroundBlack,
       appBar: AppBar(
@@ -370,11 +423,9 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ],
       ),
-// build() 안의 body 부분
       body: _isLoading
           ? const Center(child: CircularProgressIndicator(color: Colors.white))
           : ListView(
-        // ✅ 하단 여백: 위와 동일한 24 + 기기 하단 인셋
         padding: EdgeInsets.only(
           bottom: 24 + MediaQuery.of(context).padding.bottom,
         ),
@@ -384,10 +435,8 @@ class _SettingsPageState extends State<SettingsPage> {
             child: CircleAvatar(
               radius: 50,
               backgroundColor: Colors.grey[800],
-              backgroundImage:
-              (_imageUrl != null && _imageUrl!.isNotEmpty)
-                  ? AssetImage(_imageUrl!)
-                  : null,
+              // ✅ 캐시/네트워크/에셋 모두 지원 (+버스트)
+              foregroundImage: _avatarProvider(_imageUrl),
               child: (_imageUrl == null || _imageUrl!.isEmpty)
                   ? const Icon(Icons.person, size: 50, color: Colors.white)
                   : null,
@@ -406,18 +455,39 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           const SizedBox(height: 24),
-          _buildMenuItem(Icons.account_circle, '프로필 변경', () {
-            Navigator.push(
+
+          // 프로필 변경(선택)
+          _buildMenuItem(Icons.account_circle, '프로필 변경', () async {
+            await Navigator.push(
               context,
               _slideRightToLeft(const ProfileSelectScreen(allowBack: true)),
             );
+            // ✅ 선택 후 캐시에서 즉시 반영
+            await _loadCachedProfile();
           }),
-          _buildMenuItem(Icons.edit, '프로필 수정', () {
-            Navigator.push(
+
+          // 프로필 수정
+          _buildMenuItem(Icons.edit, '프로필 수정', () async {
+            final result = await Navigator.push<Map<String, dynamic>?>(
               context,
               _slideRightToLeft(const EditProfilePage()),
-            ).then((_) => _fetchProfile());
+            );
+
+            if (result != null) {
+              // ✅ 수정 결과 즉시 반영 + 캐시 저장
+              setState(() {
+                _name = result['name'];
+                _imageUrl = result['imageUrl'];
+                _selectedProfileId = result['id'] ?? result['profileId'];
+                _avatarBust = DateTime.now().millisecondsSinceEpoch;
+              });
+              await ProfileCacheService.saveProfile(result);
+            } else {
+              // 수정 페이지가 result를 안 주는 경우 서버/캐시 재동기화
+              await _fetchProfile();
+            }
           }),
+
           _buildMenuItem(Icons.bar_chart, '통계 보기', () {
             Navigator.push(
               context,
@@ -438,11 +508,9 @@ class _SettingsPageState extends State<SettingsPage> {
           }),
           _buildMenuItem(Icons.logout, '로그아웃', _showLogoutDialog),
 
-          // ✅ 마지막에 위와 동일한 여백 추가
           const SizedBox(height: 24),
         ],
       ),
-
     );
   }
 }
