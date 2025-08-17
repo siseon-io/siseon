@@ -21,7 +21,6 @@ class MqttService {
     _isConnecting = true;
 
     try {
-      print("1️⃣ MQTT 연결 시작 (TLS + 자체서명 인증서)");
 
       // ✅ .env에서 값 불러오기
       final host = dotenv.env['MQTT_HOST']!;
@@ -51,10 +50,8 @@ class MqttService {
           .withClientIdentifier(clientId)
           .startClean();
 
-      print("🟢 MQTT Connect 시도: username=$username");
       await client.connect(username, password);
     } catch (e) {
-      print('❌ MQTT 연결 실패: $e');
       client.disconnect();
     } finally {
       _isConnecting = false;
@@ -63,17 +60,14 @@ class MqttService {
 
   // 연결 성공 시 deviceSerial 기반으로 자동 구독
   Future<void> onConnected() async {
-    print('✅ MQTT 연결 성공');
     try {
       final device = await DeviceCacheService.loadDevice();
       final serial = device?['serial']?.toString();
       if (serial != null && serial.isNotEmpty) {
         subscribe('/control_mode/$serial');
       } else {
-        print('⚠️ 구독 실패: deviceSerial 없음');
       }
     } catch (e) {
-      print('⚠️ 구독 시 deviceSerial 로드 실패: $e');
     }
   }
 

@@ -14,7 +14,6 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();
   // 여기선 UI/네비/POST 금지(앱 프로세스 컨텍스트 없음)
   // ignore: avoid_print
-  print('📩 FCM [BG] ${message.data}');
 }
 
 class FCMService {
@@ -290,6 +289,5 @@ class FCMService {
 
   static void _debug(Object? msg) {
     // ignore: avoid_print
-    print('📩 FCM $msg');
   }
 }
