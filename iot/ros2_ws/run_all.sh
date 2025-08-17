@@ -1,45 +1,58 @@
 #!/bin/bash
+set -e
 
-# 현재 디렉토리 확인
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# DEBUG 환경 변수 확인 (기본값: false)
 DEBUG_MODE=${DEBUG:-false}
 
 echo "🔧 Building workspace..."
 colcon build --packages-ignore lidar_node
 
 echo "🌍 Setting up environment..."
-source install/setup.bash
-source .env
+# 로컬 환경(토픽/포트 등)
+source .env 2>/dev/null || true
 
-echo "🚀 Starting all nodes... (Debug Mode: $DEBUG_MODE)"
+# ROS setup (필요 시 경로 수정)
+ROS_DISTRO_SETUP=${ROS_DISTRO_SETUP:-/opt/ros/jazzy/setup.bash}
+WS_SETUP="$SCRIPT_DIR/install/setup.bash"
 
-# ROS 파라미터를 사용하여 디버그 모드 전달
+[[ -f "$ROS_DISTRO_SETUP" ]] || { echo "❌ $ROS_DISTRO_SETUP not found"; exit 1; }
+[[ -f "$WS_SETUP" ]] || { echo "❌ $WS_SETUP not found (build first)"; exit 1; }
+
+echo "🚀 Starting nodes (RT/FIFO: 90/85/80)..."
 ROS_ARGS="--ros-args -p debug:=$DEBUG_MODE"
 
-# 백그라운드에서 실행
-ros2 run arm_control_node arm_control_node_exec $ROS_ARGS &
-# ros2 run control_bridge_node control_bridge_node $ROS_ARGS &
-ros2 run eye_pose_node eye_pose_node $ROS_ARGS &
-ros2 run fusion_node fusion_node $ROS_ARGS &
-# ros2 launch lidar_node person_detector_launch.py &
-# ros2 run manual_bt_node manual_bt_node $ROS_ARGS &
-# ros2 run pairing_bridge_node pairing_bridge_node $ROS_ARGS &
-# ros2 run preset_bridge_node preset_bridge_node $ROS_ARGS &
+run_rt () {
+  local prio="$1"; shift
+  local pkg="$1"; shift
+  local exe="$1"; shift
+  chrt -f "$prio" bash -lc "source /opt/ros/jazzy/setup.bash; source install/setup.bash; exec ros2 run '$pkg' '$exe' $ROS_ARGS" &
+}
 
+run_norm () {
+  local pkg="$1"; shift
+  local exe="$1"; shift
+  bash -lc "source '$ROS_DISTRO_SETUP'; source '$WS_SETUP'; exec ros2 run '$pkg' '$exe' $ROS_ARGS" &
+}
 
-# 노드들이 완전히 실행될 때까지 잠시 대기 (3초)
+# RT가 유리한 노드
+run_rt 90 arm_control_node arm_control_node_exec
+run_rt 85 fusion_node     fusion_node
+run_rt 80 eye_pose_node   eye_pose_node
+run_rt 75 manual_bt_node      manual_bt_node
+
+# 나머지 일반
+run_norm control_bridge_node control_bridge_node
+run_norm pairing_bridge_node pairing_bridge_node
+run_norm preset_bridge_node  preset_bridge_node
+
+# 대기
 sleep 3
 
-# 실험을 위해 제어 모드를 'auto'로 설정
-echo "⚙️  Setting control mode to 'auto'..."
-ros2 topic pub /control_mode std_msgs/msg/String "{data: 'auto'}" --once
+echo "⚙️  Setting control mode to 'off'..."
+bash -lc "source '$ROS_DISTRO_SETUP'; source '$WS_SETUP'; ros2 topic pub /control_mode std_msgs/msg/String \"{data: 'off'}\" --once"
 
-echo "✅ All nodes started!"
-echo "🛑 Press Ctrl+C to stop all nodes."
-
-# 사용자가 Ctrl+C를 누를 때까지 대기
-trap 'echo "🛑 Stopping all nodes..."; kill $(jobs -p); exit' INT
+echo "✅ All nodes started (RT). Ctrl+C to stop."
+trap 'echo "🛑 stopping..."; kill $(jobs -p) 2>/dev/null || true; exit' INT
 wait

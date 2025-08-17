@@ -15,54 +15,49 @@
 using namespace std::chrono_literals;
 
 // --- Dynamixel (XM430) 기본 설정 ---
-#define PORT_NAME                "/dev/ttyUSB0"      // 다이나믹셀 연결 포트
-#define BAUDRATE                 1000000             // 통신 속도
-#define PROTOCOL_VERSION         2.0                 // 다이나믹셀 프로토콜 버전 (XM430는 v2.0)
+#define PORT_NAME                "/dev/ttyUSB0"
+#define BAUDRATE                 1000000
+#define PROTOCOL_VERSION         2.0
 
 // Control Table 주소 (XM430 기준)
-#define ADDR_TORQUE_ENABLE       64
-#define ADDR_GOAL_POSITION       116
-#define ADDR_PRESENT_POSITION    132
-#define ADDR_MOVING_SPEED        112   // Profile Velocity
+#define ADDR_TORQUE_ENABLE         64
+#define ADDR_GOAL_POSITION        116
+#define ADDR_PRESENT_POSITION     132
+#define ADDR_MOVING_SPEED         112   // Profile Velocity
+#define ADDR_PROFILE_ACCELERATION 108   // Profile Acceleration 추가
 
 // 위치 범위 (0~4095, 12비트)
 #define DXL_MINIMUM_POSITION_VALUE   0
 #define DXL_MAXIMUM_POSITION_VALUE   4095
 
-// 이동 속도 설정 값 (0=최대속도, 25≈5.7rpm 정도)
-#define DXL_MOVING_SPEED_VALUE       25
+// 이동 속도/가속도 (필요시 수치 조정)
+#define DXL_MOVING_SPEED_VALUE         25   // (0=최대속도, 25≈5.7rpm 정도)
+#define DXL_PROFILE_ACCELERATION_VALUE  20   // ★ 가속도(클수록 급격, 작을수록 부드럽게)
 
 class ArmControlNode : public rclcpp::Node {
 public:
   ArmControlNode() : Node("arm_control_node")
   {
-    // 조인트 이름 ↔ ID (joint1~4가 각각 다이나믹셀 ID 11~14에 매핑)
     joint_names_ = {"joint1","joint2","joint3","joint4"};
     joint_to_id_ = { {"joint1",11},{"joint2",12},{"joint3",13},{"joint4",14} };
 
-    // ---- 파라미터(보정/리밋) ----
-    // 기본은 "캘리브 비활성 + 안전 리밋 활성"
     declare_parameter<bool>("use_calibration", false);
     declare_parameter<bool>("use_limits", true);
 
-    // 선형 보정 q_corr = a*q_raw + b
     declare_parameter<double>("a_j11", 1.0); declare_parameter<double>("b_j11", 0.0);
     declare_parameter<double>("a_j12", 1.0); declare_parameter<double>("b_j12", 0.0);
     declare_parameter<double>("a_j13", 1.0); declare_parameter<double>("b_j13", 0.0);
     declare_parameter<double>("a_j14", 1.0); declare_parameter<double>("b_j14", 0.0);
 
-    // 안전 리밋 (joint11은 정면 기준 ±π/4 로 제한)
     declare_parameter<double>("min_j11", -M_PI/4.0); declare_parameter<double>("max_j11", M_PI/4.0);
     declare_parameter<double>("min_j12",  0.00);     declare_parameter<double>("max_j12",  0.95);
     declare_parameter<double>("min_j13", -1.65);     declare_parameter<double>("max_j13",  1.10);
     declare_parameter<double>("min_j14", -1.20);     declare_parameter<double>("max_j14",  1.20);
 
-    // 파라미터 로드 & 동적 파라미터 콜백 등록
     load_params_();
     cb_handle_ = add_on_set_parameters_callback(
       std::bind(&ArmControlNode::on_param_, this, std::placeholders::_1));
 
-    // Dynamixel 연결/초기화 (포트/baud 설정, 토크 ON, 속도 설정)
     port_   = dynamixel::PortHandler::getPortHandler(PORT_NAME);
     packet_ = dynamixel::PacketHandler::getPacketHandler(PROTOCOL_VERSION);
     if (!setup_()) {
@@ -71,7 +66,6 @@ public:
       return;
     }
 
-    // ROS I/F: 상태 퍼블리셔, 명령 구독, 주기 타이머
     pub_state_ = create_publisher<sensor_msgs::msg::JointState>("joint_states", 10);
     sub_cmd_   = create_subscription<arm_control_node::msg::CmdPose>(
       "/cmd_pose", 10, std::bind(&ArmControlNode::on_cmd_, this, std::placeholders::_1));
@@ -83,7 +77,6 @@ public:
   }
 
   ~ArmControlNode() override {
-    // 종료 시 모든 모터 토크 OFF
     RCLCPP_INFO(get_logger(), "Disabling torque...");
     for (const auto& p : joint_to_id_) {
       packet_->write1ByteTxRx(port_, p.second, ADDR_TORQUE_ENABLE, 0);
@@ -92,64 +85,51 @@ public:
   }
 
 private:
-  // --- ROS ---
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_state_;
   rclcpp::Subscription<arm_control_node::msg::CmdPose>::SharedPtr sub_cmd_;
   rclcpp::TimerBase::SharedPtr timer_;
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr cb_handle_;
 
-  // --- Dynamixel ---
   dynamixel::PortHandler*  port_{nullptr};
   dynamixel::PacketHandler* packet_{nullptr};
 
   std::map<std::string,int>  joint_to_id_;
   std::vector<std::string>   joint_names_;
 
-  // --- 파라미터 상태 ---
-  bool use_calib_{false};  // 보정 사용 여부
-  bool use_limits_{true};  // 안전 리밋 사용 여부
-  std::array<double,4> a_{1.0,1.0,1.0,1.0};   // 보정 계수 a
-  std::array<double,4> b_{0.0,0.0,0.0,0.0};   // 보정 오프셋 b
-  std::array<double,4> qmin_{-M_PI/4.0, 0.00, -1.65, -1.20}; // 최소 각
-  std::array<double,4> qmax_{ M_PI/4.0, 0.95,  1.10,  1.20}; // 최대 각
+  bool use_calib_{false};
+  bool use_limits_{true};
+  std::array<double,4> a_{1.0,1.0,1.0,1.0};
+  std::array<double,4> b_{0.0,0.0,0.0,0.0};
+  std::array<double,4> qmin_{-M_PI/4.0, 0.00, -1.65, -1.20};
+  std::array<double,4> qmax_{ M_PI/4.0, 0.95,  1.10,  1.20};
 
-  // --- 유틸 ---
-  // 라디안 값을 [-π, π] 범위로 래핑 (경계에서 점프 방지)
   static inline double wrap_pi(double x) {
-    return std::atan2(std::sin(x), std::cos(x));  // [-π, π]로 안정 래핑
+    return std::atan2(std::sin(x), std::cos(x));
   }
-  // 라디안 → 다이나믹셀 틱 ([-π,π]→[0..4095])
   static int rad2dxl_(double r){
-    r = wrap_pi(r);  // 안전 래핑
+    r = wrap_pi(r);
     double s = (r + M_PI) / (2.0 * M_PI) * 4095.0;
     s = std::clamp(s, 0.0, 4095.0);
     return static_cast<int>(std::lround(s));
   }
-  // 다이나믹셀 틱 → 라디안 ([0..4095]→[-π,π])
   static double dxl2rad_(uint32_t pos){
     return (static_cast<double>(pos - DXL_MINIMUM_POSITION_VALUE) / DXL_MAXIMUM_POSITION_VALUE)
            * 2.0 * M_PI - M_PI;
   }
 
-  // 각도 보정 + 리밋 적용
   inline double apply(size_t i, double raw)
   {
     if (i == 0) {
-      // joint11: 정면을 0 rad로 사용.
-      //  - 경계 점프 방지를 위해 wrap, 그리고 안전 리밋(±π/4)만 적용.
-      double delta = wrap_pi(raw);                             // 경계 안정화
-      double lim   = std::min(std::abs(qmin_[0]), std::abs(qmax_[0])); // 대칭 리밋
-      delta = std::clamp(delta, -lim, lim);                    // ±limit 제한
-      return delta;                                            // center=0 이므로 그대로 반환
+      double delta = wrap_pi(raw);
+      double lim   = std::min(std::abs(qmin_[0]), std::abs(qmax_[0]));
+      delta = std::clamp(delta, -lim, lim);
+      return delta;
     }
-
-    // ── 나머지 관절(12~14)은 (옵션)선형 보정 후, 리밋 적용 ──
     double v = use_calib_ ? (a_[i]*raw + b_[i]) : raw;
     if (use_limits_) v = std::clamp(v, qmin_[i], qmax_[i]);
     return v;
   }
 
-  // 파라미터 로드 (노드 시작 시 호출)
   void load_params_(){
     use_calib_ = get_parameter("use_calibration").as_bool();
     use_limits_ = get_parameter("use_limits").as_bool();
@@ -163,10 +143,8 @@ private:
     qmin_[1] = get_parameter("min_j12").as_double(); qmax_[1] = get_parameter("max_j12").as_double();
     qmin_[2] = get_parameter("min_j13").as_double(); qmax_[2] = get_parameter("max_j13").as_double();
     qmin_[3] = get_parameter("min_j14").as_double(); qmax_[3] = get_parameter("max_j14").as_double();
-
   }
 
-  // 동적 파라미터 변경 콜백 (런타임에 rqt/CLI로 수정 시 반영)
   rcl_interfaces::msg::SetParametersResult
   on_param_(const std::vector<rclcpp::Parameter>& ps){
     for (const auto& p : ps){
@@ -185,45 +163,47 @@ private:
     rcl_interfaces::msg::SetParametersResult r; r.successful = true; return r;
   }
 
-  // /cmd_pose 콜백 — fusion_node가 보낸 목표 각도(q)를 수신하여 모터에 전송
   void on_cmd_(const arm_control_node::msg::CmdPose::SharedPtr m){
-    // 지연(발행→수신) 측정 로그
-    if (m->header.stamp.sec || m->header.stamp.nanosec){
-      auto lat = now() - rclcpp::Time(m->header.stamp);
-      RCLCPP_INFO(get_logger(), "Total Latency: %.2f ms", lat.seconds() * 1000.0);
-    }
-
-    // 수신한 라디안 각도(raw)
+    // if (m->header.stamp.sec || m->header.stamp.nanosec){
+    //   const auto d = now() - rclcpp::Time(m->header.stamp);
+    //   const double pipe_ms = d.seconds() * 1000.0;
+    //   RCLCPP_INFO(get_logger(), "⏱️ Pipeline latency: %.3f ms (now - header.stamp)", pipe_ms);
+    // }
     std::array<double,4> q_raw{m->m11, m->m12, m->m13, m->m14};
-    
-    // 보정/리밋 적용
     std::array<double,4> q{
       apply(0, q_raw[0]),
       apply(1, q_raw[1]),
       apply(2, q_raw[2]),
       apply(3, q_raw[3])
     };
-    
-    // 각 조인트 라디안 → 다이나믹셀 위치값으로 변환 후 GOAL_POSITION에 기록
+
+    const auto t_io_start = now();
     for (const auto& it : std::vector<std::pair<std::string,double>>{
           {"joint1", q[0]}, {"joint2", q[1]}, {"joint3", q[2]}, {"joint4", q[3]} }){
       int id   = joint_to_id_[it.first];
-      int goal = rad2dxl_(it.second);  // [-π,π] → [0..4095]
+      int goal = rad2dxl_(it.second);
       uint8_t err = 0;
       int rc = packet_->write4ByteTxRx(port_, id, ADDR_GOAL_POSITION, goal, &err);
       if (rc != COMM_SUCCESS)
         RCLCPP_ERROR(get_logger(), "ID %d comm fail: %s", id, packet_->getTxRxResult(rc));
       else if (err)
         RCLCPP_ERROR(get_logger(), "ID %d hw err: %s",  id, packet_->getRxPacketError(err));
-    }  
+    }
+    const auto t_io_end = now();
+    const double io_ms = (t_io_end - t_io_start).seconds() * 1000.0;
 
-    // 디버그: 수신 각(q_raw)과 실제 전송 각(q)의 비교 로그
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 200,
-      "q_raw=[%.4f, %.4f, %.4f, %.4f] -> q_send=[%.4f, %.4f, %.4f, %.4f]",
-      q_raw[0], q_raw[1], q_raw[2], q_raw[3], q[0], q[1], q[2], q[3]);
+    // --- end-to-end (t0→모터명령 완료) ---
+    double e2e_ms = NAN;
+    if (m->header.stamp.sec || m->header.stamp.nanosec){
+      e2e_ms = (t_io_end - rclcpp::Time(m->header.stamp)).seconds() * 1000.0;
+    }
+
+    // RCLCPP_INFO(get_logger(),
+    //   "Actuation I/O time: %.3f ms | E2E from header.stamp: %s",
+    //   io_ms,
+    //   (std::isnan(e2e_ms) ? "n/a" : (std::to_string(e2e_ms) + " ms").c_str()) );
   }
 
-  // 주기적으로 현재 모터 위치를 읽어 /joint_states 퍼블리시
   void on_timer_(){
     auto msg = std::make_unique<sensor_msgs::msg::JointState>();
     msg->header.stamp = now();
@@ -233,13 +213,12 @@ private:
       int rc = packet_->read4ByteTxRx(port_, id, ADDR_PRESENT_POSITION, &pos, &err);
       if (rc == COMM_SUCCESS && !err) {
         msg->name.push_back(n);
-        msg->position.push_back(dxl2rad_(pos)); // [0..4095] → [-π,π]
+        msg->position.push_back(dxl2rad_(pos));
       }
     }
     if (!msg->name.empty()) pub_state_->publish(std::move(msg));
   }
 
-  // 초기화: 포트/baud 설정 → 각 ID 토크 ON & 속도 설정
   bool setup_(){
     if (!port_->openPort()) { RCLCPP_ERROR(get_logger(),"openPort failed: %s", PORT_NAME); return false; }
     if (!port_->setBaudRate(BAUDRATE)) { RCLCPP_ERROR(get_logger(),"setBaudRate failed: %d", BAUDRATE); return false; }
@@ -247,10 +226,16 @@ private:
 
     for (const auto& p : joint_to_id_){
       uint8_t e = 0;
+
+      // ★ Profile Acceleration 설정
+      int rc = packet_->write4ByteTxRx(port_, p.second, ADDR_PROFILE_ACCELERATION, DXL_PROFILE_ACCELERATION_VALUE, &e);
+      if (rc != COMM_SUCCESS || e) { RCLCPP_ERROR(get_logger(),"ID %d set accel fail", p.second); return false; }
+
       // Torque ON
-      int rc = packet_->write1ByteTxRx(port_, p.second, ADDR_TORQUE_ENABLE, 1, &e);
+      rc = packet_->write1ByteTxRx(port_, p.second, ADDR_TORQUE_ENABLE, 1, &e);
       if (rc != COMM_SUCCESS || e) { RCLCPP_ERROR(get_logger(),"ID %d torque ON fail", p.second); return false; }
-      // Profile Velocity (속도 설정)
+
+      // Profile Velocity 설정
       rc = packet_->write4ByteTxRx(port_, p.second, ADDR_MOVING_SPEED, DXL_MOVING_SPEED_VALUE, &e);
       if (rc != COMM_SUCCESS || e) { RCLCPP_ERROR(get_logger(),"ID %d set speed fail", p.second); return false; }
     }

@@ -41,9 +41,9 @@ public:
     // 4) Start UDP receive
     start_receive();
 
-    // 4) 10초마다 HTTP 전송 타이머
+    // 4) 1초마다 HTTP 전송 타이머
     http_timer_ = this->create_wall_timer(
-      std::chrono::seconds(10),
+      std::chrono::seconds(1),
       std::bind(&EyePosNode::onHttpTimer, this)
     );
 
@@ -157,14 +157,14 @@ private:
 
     // 1. 프로필 ID 읽기
     int profile_id = 1; // 기본값
-    std::ifstream profile_file("profile.json");
+    std::ifstream profile_file("/home/b101/chj/S13P11B101/iot/ros2_ws/profile.json");
     if (profile_file.is_open()) {
         try {
             json profile_json;
             profile_file >> profile_json;
-            if (profile_json.contains("profileId")) {
+            if (profile_json.contains("profile_id")) {
                 // profileId가 문자열일 경우를 대비하여 stoi 사용
-                profile_id = std::stoi(profile_json["profileId"].get<std::string>());
+                profile_id = std::stoi(profile_json["profile_id"].get<std::string>());
             }
         } catch (const std::exception& e) {
             RCLCPP_WARN(this->get_logger(), "profile.json 파싱 실패: %s", e.what());
@@ -203,17 +203,7 @@ private:
     user_coord["pose_data"] = pose_data;
     payload_to_send["userCoord"] = user_coord;
 
-    // monitor_coord 구성
-    json monitor_coord = {{"x", 0}, {"y", 0}, {"z", 0}};
-    if (j.contains("pose_xyz") && j["pose_xyz"].is_array()) {
-        for (const auto& point : j["pose_xyz"]) {
-            if (point.is_array() && point.size() == 3 && !point[0].is_null()) {
-                monitor_coord = get_xyz(point);
-                break;
-            }
-        }
-    }
-    payload_to_send["monitorCoord"] = monitor_coord;
+    // RCLCPP_INFO(this->get_logger(), "user_coord[\"pose_data\"]: %s", user_coord["pose_data"].dump(4).c_str());
 
     std::string http_payload = payload_to_send.dump(4); // 4는 들여쓰기
 
@@ -227,15 +217,15 @@ private:
     curl_easy_setopt(curl, CURLOPT_URL, server_url_.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, http_payload.c_str());
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 10L); // 타임아웃을 10초로 늘림
 
     CURLcode res = curl_easy_perform(curl);
     if (res == CURLE_OK) {
       long code = 0;
       curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &code);
-      RCLCPP_INFO(this->get_logger(),
-                  "HTTP POST 성공: 코드=%ld, payload=%s",
-                  code, http_payload.c_str());
+      // RCLCPP_INFO(this->get_logger(),
+      //             "HTTP POST 성공: 코드=%ld",
+      //             code);
     } else {
       RCLCPP_ERROR(this->get_logger(),
                    "HTTP POST 실패: %s",
