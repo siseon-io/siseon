@@ -16,21 +16,39 @@ import java.util.Map;
                 @Index(name = "idx_ps_good_scan", columnList = "profile_id, end_at, processed_good")
         }
 )
-@Getter @Setter
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
 public class PostureStats {
 
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(name = "profile_id", nullable = false)
     private Long profileId;
 
-    @Column(name = "monitor_coord", columnDefinition = "JSON", nullable = false)
-    @Convert(converter = JsonConverter.class)
-    private Map<String, Object> monitorCoord;
+    // ✅ le_eye 평균 좌표
+    @Column(name = "lefteye_x")
+    private Double lefteyeX;
+
+    @Column(name = "lefteye_y")
+    private Double lefteyeY;
+
+    @Column(name = "lefteye_z")
+    private Double lefteyeZ;
+
+    // ✅ re_eye 평균 좌표
+    @Column(name = "righteye_x")
+    private Double righteyeX;
+
+    @Column(name = "righteye_y")
+    private Double righteyeY;
+
+    @Column(name = "righteye_z")
+    private Double righteyeZ;
 
     @Column(name = "user_coord", columnDefinition = "JSON")
     @Convert(converter = JsonConverter.class)

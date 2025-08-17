@@ -10,16 +10,17 @@ import java.util.Map;
 
 @Entity
 @Table(name = "raw_postures")
-@Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class RawPosture {
-    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     private Long profileId;
-
-    @Column(name = "monitor_coord", columnDefinition = "JSON", nullable = false)
-    @Convert(converter = JsonConverter.class)
-    private Map<String, Number> monitorCoord;
 
     @Column(name = "user_coord", columnDefinition = "JSON", nullable = false)
     @Convert(converter = JsonConverter.class)

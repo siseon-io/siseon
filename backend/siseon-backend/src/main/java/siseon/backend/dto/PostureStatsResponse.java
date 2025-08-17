@@ -27,7 +27,6 @@ public class PostureStatsResponse {
         return PostureStatsResponse.builder()
                 .id(entity.getId())
                 .profileId(entity.getProfileId())
-                .monitorCoord(entity.getMonitorCoord())
                 .userCoord(entity.getUserCoord())
                 .startAt(entity.getStartAt())
                 .endAt(entity.getEndAt())

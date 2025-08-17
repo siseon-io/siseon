@@ -38,7 +38,10 @@ public class PresetCoordinateController {
                 req.getProfileId(),
                 req.getPresetId()
         );
-        publisher.publish(coord);
+
+        String serialNumber = presetService.getSerialNumberByProfileId(req.getProfileId());
+        publisher.publish(coord, serialNumber);
+
         return ResponseEntity.ok(coord);
     }
 }

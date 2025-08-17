@@ -11,6 +11,5 @@ import java.util.Map;
 @AllArgsConstructor
 public class RawPostureRequest {
     private Long profileId;
-    private Map<String, Number> monitorCoord;
     private Map<String, Object> userCoord;
 }

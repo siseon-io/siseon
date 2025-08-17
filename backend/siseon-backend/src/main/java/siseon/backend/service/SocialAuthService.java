@@ -79,7 +79,7 @@ public class SocialAuthService {
         JwtClaimsSet accessClaims = JwtClaimsSet.builder()
                 .issuer("siseon")
                 .issuedAt(now)
-                .expiresAt(now.plus(2, ChronoUnit.MINUTES))
+                .expiresAt(now.plus(30, ChronoUnit.MINUTES))
                 .subject(subject)
                 .claim("roles", roles)
                 .build();

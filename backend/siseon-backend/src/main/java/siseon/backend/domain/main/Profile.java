@@ -37,7 +37,7 @@ public class Profile {
 
     @NotNull
     @Column(nullable = false)
-    private Float height;
+    private Integer height;
 
     @NotNull
     @Column(name = "left_vision", nullable = false)

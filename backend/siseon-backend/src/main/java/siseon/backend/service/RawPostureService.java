@@ -17,7 +17,6 @@ public class RawPostureService {
     public void saveRawPosture(RawPostureRequest req) {
         RawPosture entity = RawPosture.builder()
                 .profileId(req.getProfileId())
-                .monitorCoord(req.getMonitorCoord())
                 .userCoord(req.getUserCoord())
                 .build();
         rawPostureRepository.save(entity);
