@@ -25,6 +25,7 @@ import 'package:siseon2/pages/device_register_page.dart';
 import 'package:siseon2/pages/settings/preset_page.dart';
 import 'package:siseon2/pages/settings/stats_page.dart';
 import 'package:siseon2/pages/settings/edit_profile.dart';
+import 'package:siseon2/pages/tutorial_screen.dart'; // ✅ 튜토리얼 다시보기용
 
 import 'package:siseon2/widgets/rect_card.dart';
 
@@ -843,12 +844,14 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // 스낵바 제거
     }
   }
+
   Future<void> refreshFromRoot() async {
     // 프리셋/프로필 최신화
     await _loadProfileAndPresets();
     // 통계/배너 등도 같이 갱신
     await _refreshSilently();
   }
+
   // 전체 OFF 재발행
   Future<void> _resetMqttAllModes() async {
     final ok = await _requireDeviceReadyAndRegistered();
@@ -981,6 +984,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               ),
                             ),
                           ),
+                          // ⚙️ 프로필 수정
                           IconButton(
                             icon: const Icon(Icons.settings, color: Colors.white),
                             onPressed: () async {
@@ -1009,6 +1013,24 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               }
 
                               await _refreshSilently();
+                            },
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+                          const SizedBox(width: 6),
+                          // ❓ 튜토리얼 다시보기
+                          IconButton(
+                            icon: const Icon(Icons.help_outline, color: Colors.white),
+                            tooltip: '튜토리얼 보기',
+                            onPressed: () async {
+                              final pid = (_profile?['id'] ?? _profile?['profileId']) as int?;
+                              if (pid == null) return;
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => TutorialScreen(profileId: pid, fromMenu: true),
+                                ),
+                              );
                             },
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),
@@ -1078,6 +1100,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ],
     );
   }
+
   Future<void> _showResetConfirmDialog() async {
     final yes = await showDialog<bool>(
       context: context,
@@ -1115,6 +1138,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await _resetMqttAllModes(); // 실제 초기화 실행 (OFF로 전환)
     }
   }
+
   // 🔴 우상단 작은 초기화 버튼 포함
   Widget _modeStatusCardCentered() {
     return RectCard(

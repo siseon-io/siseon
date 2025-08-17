@@ -53,6 +53,7 @@ class _RootScreenState extends State<RootScreen> {
         SnackBar(content: Text(msg)),
       );
   }
+
   @override
   void initState() {
     super.initState();
@@ -74,7 +75,8 @@ class _RootScreenState extends State<RootScreen> {
     });
     FlutterBluePlus.scanResults.listen((results) {
       for (final r in results) {
-        debugPrint('📡 [Scan] name=${r.device.name}, id=${r.device.id}, rssi=${r.rssi}');
+        debugPrint('📡 [Scan] name=${r.device.name}, id=${r.device.id}, rssi=${r
+            .rssi}');
       }
     });
   }
@@ -180,7 +182,8 @@ class _RootScreenState extends State<RootScreen> {
 
   Future<void> _selectTab(int idx) async {
     if (idx == 1 || idx == 2) {
-      await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+      await SystemChrome.setPreferredOrientations(
+          [DeviceOrientation.portraitUp]);
     }
     if (idx == 0) {
       await _homeKey.currentState?.refreshFromRoot();
@@ -197,29 +200,32 @@ class _RootScreenState extends State<RootScreen> {
       context: context,
       barrierDismissible: false,
       useRootNavigator: true,
-      builder: (_) => WillPopScope(
-        onWillPop: () async => false,
-        child: Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 28),
-            decoration: BoxDecoration(
-              color: const Color(0xFF0D1117).withOpacity(0.9),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: Colors.white24),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const CircularProgressIndicator(),
-                const SizedBox(height: 16),
-                Text(message,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white, fontSize: 14)),
-              ],
+      builder: (_) =>
+          WillPopScope(
+            onWillPop: () async => false,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    vertical: 24, horizontal: 28),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0D1117).withOpacity(0.9),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 16),
+                    Text(message,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 14)),
+                  ],
+                ),
+              ),
             ),
           ),
-        ),
-      ),
     );
     await Future.delayed(dur);
     if (mounted) Navigator.of(context, rootNavigator: true).pop();
@@ -243,30 +249,36 @@ class _RootScreenState extends State<RootScreen> {
     final go = await showDialog<bool>(
       context: context,
       barrierDismissible: true,
-      builder: (_) => AlertDialog(
-        backgroundColor: rootBackground,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('기기 등록이 필요합니다',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-        content: const Text('이 기능을 사용하려면 먼저 기기를 등록해주세요.',
-            style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('등록하기',
-                style: TextStyle(color: primaryBlue, fontWeight: FontWeight.w700)),
+      builder: (_) =>
+          AlertDialog(
+            backgroundColor: rootBackground,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+            title: const Text('기기 등록이 필요합니다',
+                style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w700)),
+            content: const Text('이 기능을 사용하려면 먼저 기기를 등록해주세요.',
+                style: TextStyle(color: Colors.white70)),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('등록하기',
+                    style: TextStyle(
+                        color: primaryBlue, fontWeight: FontWeight.w700)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text(
+                    '취소', style: TextStyle(color: Colors.white70)),
+              ),
+            ],
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('취소', style: TextStyle(color: Colors.white70)),
-          ),
-        ],
-      ),
     );
 
     if (go == true) {
       final result =
-      await Navigator.push(context, MaterialPageRoute(builder: (_) => const DeviceRegisterPage()));
+      await Navigator.push(context,
+          MaterialPageRoute(builder: (_) => const DeviceRegisterPage()));
       if (result == true) {
         await _ensureDeviceSerialWithFallback();
         return true;
@@ -275,7 +287,8 @@ class _RootScreenState extends State<RootScreen> {
     return false;
   }
 
-  Future<bool> _publishControlMode(ControlMode nextMode, {required String deviceSerial}) async {
+  Future<bool> _publishControlMode(ControlMode nextMode,
+      {required String deviceSerial}) async {
     final ok = await _requireDeviceRegistered();
     if (!ok || _profileId == null) return false;
 
@@ -308,7 +321,8 @@ class _RootScreenState extends State<RootScreen> {
       return;
     }
 
-    final ok2 = await _publishControlMode(ControlMode.auto, deviceSerial: serial);
+    final ok2 = await _publishControlMode(
+        ControlMode.auto, deviceSerial: serial);
     if (!ok2) return;
 
     _homeKey.currentState?.setModeExternal(ControlMode.auto);
@@ -400,7 +414,8 @@ class _RootScreenState extends State<RootScreen> {
           }
         },
       ),
-      (_profileId == null) ? _buildNoProfileGate() : ChatbotPage(profileId: _profileId!),
+      (_profileId == null) ? _buildNoProfileGate() : ChatbotPage(
+          profileId: _profileId!),
       const SettingsPage(),
     ];
 
@@ -431,7 +446,8 @@ class _RootScreenState extends State<RootScreen> {
               shape: const CircleBorder(),
               elevation: 6,
               clipBehavior: Clip.antiAlias,
-              child: const Icon(Icons.remove_red_eye, size: 26, color: Colors.white),
+              child: const Icon(
+                  Icons.remove_red_eye, size: 26, color: Colors.white),
             ),
           ),
         ),
@@ -444,7 +460,9 @@ class _RootScreenState extends State<RootScreen> {
   Widget _bottomBar() {
     final media = MediaQuery.of(context);
     final bottom = media.padding.bottom;
-    final extra = media.viewInsets.bottom > 0 ? 0.0 : bottom; // 키보드 없을 때만 SafeArea 높이
+    final extra = media.viewInsets.bottom > 0
+        ? 0.0
+        : bottom; // 키보드 없을 때만 SafeArea 높이
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -502,7 +520,8 @@ class _RootScreenState extends State<RootScreen> {
         title: const Text('챗봇', style: TextStyle(color: Colors.white)),
       ),
       body: const Center(
-        child: Text('먼저 프로필을 선택/생성해주세요.', style: TextStyle(color: Colors.white70)),
+        child: Text(
+            '먼저 프로필을 선택/생성해주세요.', style: TextStyle(color: Colors.white70)),
       ),
     );
   }
@@ -524,7 +543,8 @@ class _RootScreenState extends State<RootScreen> {
             const SizedBox(height: 3),
             Text(
               label,
-              style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                  color: color, fontSize: 11, fontWeight: FontWeight.w500),
             ),
           ],
         ),
@@ -541,10 +561,17 @@ class _RootScreenState extends State<RootScreen> {
         onTap: _handleManualTap,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.menu_book_rounded, color: inactiveGrey, size: 24),
-            SizedBox(height: 3),
-            Text('수동', style: TextStyle(color: inactiveGrey, fontSize: 11, fontWeight: FontWeight.w500)),
+          children: [
+            Icon(Icons.open_with_rounded, color: inactiveGrey, size: 24),
+            const SizedBox(height: 3),
+            const Text(
+              '수동',
+              style: TextStyle(
+                color: inactiveGrey,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ],
         ),
       ),
