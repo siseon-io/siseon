@@ -190,7 +190,7 @@ private:
     // 지연(발행→수신) 측정 로그
     if (m->header.stamp.sec || m->header.stamp.nanosec){
       auto lat = now() - rclcpp::Time(m->header.stamp);
-      RCLCPP_INFO(get_logger(), "Total Latency: %.2f ms", lat.seconds() * 1000.0);
+      // RCLCPP_INFO(get_logger(), "Total Latency: %.2f ms", lat.seconds() * 1000.0);
     }
 
     // 수신한 라디안 각도(raw)
@@ -218,9 +218,9 @@ private:
     }  
 
     // 디버그: 수신 각(q_raw)과 실제 전송 각(q)의 비교 로그
-    RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 200,
-      "q_raw=[%.4f, %.4f, %.4f, %.4f] -> q_send=[%.4f, %.4f, %.4f, %.4f]",
-      q_raw[0], q_raw[1], q_raw[2], q_raw[3], q[0], q[1], q[2], q[3]);
+    // RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 200,
+    //   "q_raw=[%.4f, %.4f, %.4f, %.4f] -> q_send=[%.4f, %.4f, %.4f, %.4f]",
+    //   q_raw[0], q_raw[1], q_raw[2], q_raw[3], q[0], q[1], q[2], q[3]);
   }
 
   // 주기적으로 현재 모터 위치를 읽어 /joint_states 퍼블리시

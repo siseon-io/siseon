@@ -20,22 +20,22 @@ echo "🚀 Starting all nodes... (Debug Mode: $DEBUG_MODE)"
 ROS_ARGS="--ros-args -p debug:=$DEBUG_MODE"
 
 # 백그라운드에서 실행
+ros2 run manual_bt_node manual_bt_node $ROS_ARGS &
+ros2 run pairing_bridge_node pairing_bridge_node $ROS_ARGS &
 ros2 run arm_control_node arm_control_node_exec $ROS_ARGS &
-# ros2 run control_bridge_node control_bridge_node $ROS_ARGS &
+ros2 run control_bridge_node control_bridge_node $ROS_ARGS &
 ros2 run eye_pose_node eye_pose_node $ROS_ARGS &
 ros2 run fusion_node fusion_node $ROS_ARGS &
 # ros2 launch lidar_node person_detector_launch.py &
-# ros2 run manual_bt_node manual_bt_node $ROS_ARGS &
-# ros2 run pairing_bridge_node pairing_bridge_node $ROS_ARGS &
-# ros2 run preset_bridge_node preset_bridge_node $ROS_ARGS &
+ros2 run preset_bridge_node preset_bridge_node $ROS_ARGS &
 
 
 # 노드들이 완전히 실행될 때까지 잠시 대기 (3초)
 sleep 3
 
-# 실험을 위해 제어 모드를 'auto'로 설정
-echo "⚙️  Setting control mode to 'auto'..."
-ros2 topic pub /control_mode std_msgs/msg/String "{data: 'auto'}" --once
+# 실험을 위해 제어 모드를 'off'로 설정
+echo "⚙️  Setting control mode to 'off'..."
+ros2 topic pub /control_mode std_msgs/msg/String "{data: 'off'}" --once
 
 echo "✅ All nodes started!"
 echo "🛑 Press Ctrl+C to stop all nodes."
