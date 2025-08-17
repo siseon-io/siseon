@@ -6,7 +6,7 @@
 
 - Jetson Orin Nano 기반 AI 모듈
 - Raspberry Pi 5 제어 시스템
-- SCARA 방식 3축 로봇 암
+- 5DOF 오픈매니퓰레이터 (OpenMANIPULATOR-X, RM-X52-TNM)
 - Spring Boot API 서버 및 Flutter 앱
 - AWS RDS 기반 프리셋/로그 저장
 
@@ -26,9 +26,11 @@
 ## 시스템 구성도
 
 ```
-[App UI] ⇄ [Spring API] ⇄ [Http Module (Pi5)] ⇄ [UART] ⇄ [Jetson]
-                                           ↓
-                                   [SCARA 모니터 암]
+[Flutter App] ↔ [Spring API Server (EC2)]
+    ↕ (BLE, MQTT)                ↕ (HTTP, MQTT)
+[Raspberry Pi 5 (ROS2 Nodes)] ↔ [OpenMANIPULATOR-X]
+    ↑ (UDP Socket)
+[Jetson Nano]
 ```
 
 ---
@@ -37,37 +39,36 @@
 
 ### 1. 프리셋 적용
 1. 사용자 앱에서 프리셋 선택
-2. Spring API에 요청 저장
-3. Http Module(Pi5)로 polling 후 제어 명령 실행
-4. Pi5가 Arm 제어 → 디스플레이 이동
+2. Spring API 서버에 프리셋 적용 요청 (HTTP)
+3. Spring 서버가 MQTT Topic(`/preset_coordinate/{device_id}`)으로 프리셋 좌표 전송
+4. Pi의 `preset_bridge_node`가 메시지를 수신하여 `fusion_node`로 전달
+5. 최종 제어 명령이 `arm_control_node`를 통해 매니퓰레이터로 전송
 
 ### 2. 자동 제어
-1. Jetson 실시간 추론 결과 전송
-   - Eye Detection 결과 (눈 위치 y, z축 좌표) 전송
-   - Pose Estimation 결과 (상반신 관절 단위 y, z축 좌표) 전송
-2. Pi가 Jetson 결과에 따라 Arm x, y, z축 제어
-3. Flutter가 App에서 누적된 데이터 바탕으로 사용자 대시보드 제공
-4. (Option) 서버에 프리셋 저장 요청
+1. Jetson이 실시간 추론 결과(눈/자세 좌표)를 Pi로 전송 (UDP Socket)
+2. Pi의 `eye_pose_node`가 데이터를 수신하여 ROS2 Topic(`/eye_pose`)으로 발행
+3. `fusion_node`가 눈 위치 데이터를 기반으로 목표 위치 계산
+4. Pi는 실시간 자세 데이터를 Spring 서버로 전송 (MQTT)
+5. 최종 제어 명령이 `arm_control_node`를 통해 매니퓰레이터로 전송
 
 ### 3. 수동 제어
-1. Flutter 앱에서 수동으로 지정
-2. Flutter 앱에서 조이스틱 (x, y 1개, z 1개) 으로 조정
-3. Http Module(Pi5)로 POST 요청 받아서 제어 명령 실행
-4. (Option) 서버에 프리셋 저장 요청
+1. Flutter 앱에서 조이스틱으로 수동 조작
+2. 앱이 Pi의 `manual_bt_node`와 직접 통신(BLE)하여 실시간 제어
+3. (Option) 현재 위치를 서버에 프리셋으로 저장 요청 (HTTP)
 
 ---
 
 ## 설치 및 실행 방법
 
-### 1. Jetson Orin Nano
-- **OS**: Ubuntu 20.04 + JetPack 5.x
+### 1. Jetson Nano
+- **OS**: Ubuntu 22.04+ (JetPack 4.x)
 - **설치**: `requirements.txt` + 카메라 설정
-- **AI 모델**: PyTorch, OpenCV, Ultralytics YOLO
+- **AI 모델**: PyTorch, OpenCV, Ultralytics YOLOv11
 
 ### 2. Raspberry Pi 5
-- **OS**: VxWorks OS (64-bit) → RTOS
-- **설치**: Http Module + GPIO 제어 서비스 등록
-- **펌웨어**: C/C++ + GPIO/PWM 라이브러리
+- **OS**: Ubuntu 24.04 LTS (64-bit)
+- **설치**: ROS2 Jazzy, DYNAMIXEL SDK, MQTT 클라이언트 라이브러리
+- **펌웨어**: C++ (ROS2 기반 노드)
 
 ### 3. EC2 서버
 - **OS**: Ubuntu 22.04 + OpenJDK 17 + Spring Boot
@@ -82,11 +83,11 @@
 
 ## 기술 스택
 
-- **Backend**: Java (Spring Boot)
-- **Frontend**: Flutter
-- **Firmware**: C/C++ (GPIO, PWM)
-- **AI**: PyTorch, OpenCV, Ultralytics YOLO
-- **DB**: AWS RDS (MySQL 등)
+- **Backend**: Java (Spring Boot), Spring Batch, MQTT(EMQX), Jenkins, Docker
+- **Frontend**: Flutter, BLE(`flutter_blue_plus`), MQTT(`mqtt_client`)
+- **Firmware**: C++ (ROS2, DYNAMIXEL SDK)
+- **AI**: PyTorch, OpenCV, Ultralytics YOLOv11, FastAPI
+- **DB**: AWS RDS (MySQL)
 
 ---
 
@@ -106,27 +107,33 @@ S13P11B101/
 ## 주요 인터페이스
 
 ### 하드웨어 인터페이스
-- **Jetson ↔ Pi5**: UART 3.3V TTL, 115200bps
-- **Pi5 ↔ 모니터암**: GPIO (PWM, Relay), I2C (PCA9685)
-- **서보모터**: MG996R (PWM 제어, 6V 전원)
-- **리니어 액추에이터**: 12V + 릴레이 구동
+- **Jetson ↔ Pi5**: UDP Socket
+- **Pi5 ↔ 매니퓰레이터**: DYNAMIXEL Protocol (TTL Half Duplex UART)
+- **액추에이터**: DYNAMIXEL XM430-W210-T
 
 ### 소프트웨어 인터페이스
-- **Pi5 Http Module**:
-  - `POST /apply-preset`: 프리셋 적용 명령
-  - `POST /move-arm`: 수동 좌표 이동
-- **Jetson**:
-  - `UART Packet: EYE_POS,x,y,z`
-  - `UART Command: RESET / RE-CALIBRATE`
-- **EC2 API**:
-  - `POST /api/preset`
-  - `POST /api/monitoring`
-  - `GET /api/user/history`
+
+#### MQTT Topics (App/Server ↔ Pi5)
+- **`/control_mode/{device_id}`**: 제어 모드(auto/manual/preset) 변경
+- **`/preset_coordinate/{device_id}`**: 프리셋 좌표 전송
+- **`/request_pair/{device_id}`**: 디바이스 페어링 요청
+
+#### ROS2 Topics (Pi5 내부 노드 간 통신)
+- **`/eye_pose`**: Jetson에서 수신한 실시간 눈 좌표
+- **`/manual_pose`**: 앱(BLE)에서 수신한 수동 제어 좌표
+- **`/preset_pose`**: MQTT로 수신한 프리셋 좌표
+- **`/cmd_pose`**: 최종 계산된 매니퓰레이터 목표 위치
+
+#### REST API (App ↔ Server)
+- **`POST /api/auth/login`**: 로그인 (JWT 발급)
+- **`POST /api/presets`**: 프리셋 저장
+- **`GET /api/stats`**: 자세 통계 조회
 
 ### 통신 인터페이스
-- **Jetson ↔ Pi5**: UART
-- **Pi5 ↔ EC2**: HTTP REST API
-- **Http Module ↔ Flutter**: CORS 허용 REST
+- **Jetson ↔ Pi5**: UDP Socket
+- **Pi5 ↔ EC2 Server**: MQTT (TLS), HTTP
+- **Flutter ↔ Pi5**: BLE, MQTT (TLS)
+- **Flutter ↔ EC2 Server**: HTTPS (REST API)
 
 ---
 
@@ -136,17 +143,17 @@ S13P11B101/
 - 프리셋 적용 후 모니터 도달 시간 ≤ 10초
 - Jetson AI 모델 프레임 속도 ≥ 15 FPS
 - EC2는 초당 프리셋 요청 50 TPS 처리 가능
-- Arm 이동 속도: 0.5 cm/s
-- AI 추론 시간: 33 ~ 60 ms/frame
+- Arm 이동 속도: 112 rpm
+- AI 추론 시간: 33 ~ 50 ms/frame
 
 ---
 
 ## 보안 요구사항
 
 - Pi5, Jetson은 LAN 내부에서만 접근 가능하도록 방화벽 구성
-- Http Module는 JWT 기반 인증 적용 예정
+- API 서버 및 Pi 제어 모듈은 JWT 기반 인증 적용
 - EC2 Spring 서버는 HTTPS + API Key 인증 적용
-- 앱 → EC2 통신은 TLS 1.2 이상 사용
+- 앱 ↔ 서버, 앱 ↔ Pi(MQTT) 통신은 TLS 1.2 이상 사용
 - 카메라 이미지 미저장 원칙
 
 ---
