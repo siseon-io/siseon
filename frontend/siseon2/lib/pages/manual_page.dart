@@ -29,21 +29,28 @@ enum PayloadFmt { i8x3, i16x3, i8x4, i8x8, i8x20 }
 class _ManualPageState extends State<ManualPage> {
   // ── 상태
   List<int> _payload = [0, 0, 0];
-  String _debugMessage = '🔌 연결 상태 확인 중...';
+  String _debugMessage = '🔌 연결 상태 확인 중...'; // 화면에 표시 안 함
   String? _lastBleError;
 
   Timer? _sendTimer;
   StreamSubscription<BluetoothConnectionState>? _connectionSub;
 
+  // (1) 무응답 쓰기 강제
   bool _useWriteWithoutResponse = true;
+  // (2) MTU
+  int _mtuSize = 23;
+  // (3) 우선순위 HIGH 요청 여부(조회 API는 없어 요청 사실만 기록)
+  bool _priorityHighRequested = false;
+
   bool _isConnected = false;
   bool _isWriting = false;
+  bool _linkBoosted = false; // 연결마다 1회 부스팅 가드
+  DateTime _lastCheckLog = DateTime.fromMillisecondsSinceEpoch(0);
 
   // pop 시 중복 발행 방지용
   bool _isExiting = false;
 
   PayloadFmt _fmt = PayloadFmt.i8x3;
-  int _mtuSize = 23;
 
   String? _deviceSerial;
   bool _resolvingSerial = false;
@@ -69,9 +76,10 @@ class _ManualPageState extends State<ManualPage> {
     mqttService.connect();
 
     _resolveDeviceSerial();
-    _checkCharacteristicCapabilities();
-    _requestMtuSize();
+    _checkCharacteristicCapabilities(); // NR 강제
+    _requestMtuSize();                  // 초기 MTU 요청
     _listenConnectionState();
+    _ensureInitiallyConnected();        // 초기 연결 확인
     _startSending();
   }
 
@@ -131,6 +139,19 @@ class _ManualPageState extends State<ManualPage> {
     }
   }
 
+  Future<void> _ensureInitiallyConnected() async {
+    try {
+      final s = await widget.writableChar.device.state.first
+          .timeout(const Duration(seconds: 2));
+      if (s != BluetoothConnectionState.connected) {
+        _notifyAndExitWithFix('연결 실패: 다시 연결해 주세요');
+      }
+    } catch (_) {
+      _notifyAndExitWithFix('연결 실패: 다시 연결해 주세요');
+    }
+  }
+
+  // (2) MTU 크게
   void _requestMtuSize() async {
     try {
       final mtu = await widget.writableChar.device.requestMtu(512);
@@ -139,23 +160,44 @@ class _ManualPageState extends State<ManualPage> {
     } catch (_) {}
   }
 
+  // (1) NR 강제: 리모트가 NR 미지원이면 이후 write 시 예외 → 안내 후 종료
   void _checkCharacteristicCapabilities() {
     final p = widget.writableChar.properties;
-    final supportsWrite = p.write || p.writeWithoutResponse;
-    _useWriteWithoutResponse = p.writeWithoutResponse;
+    _useWriteWithoutResponse = true; // 항상 NR로 보냄
 
+    final supportsNR = p.writeWithoutResponse;
     setState(() {
-      _debugMessage = supportsWrite
-          ? 'ℹ️ 특성 지원: Write=${p.write}, WriteNR=${p.writeWithoutResponse}'
-          : '⚠️ 이 특성은 write를 지원하지 않습니다.';
+      _debugMessage = supportsNR
+          ? 'ℹ️ 강제 NR 모드 (리모트 NR 지원)'
+          : '⚠️ 강제 NR 모드 (리모트 NR 미지원일 수 있음)';
     });
   }
 
+  // (3) 연결 우선순위 HIGH + MTU 재요청을 연결 시 마다 보장
+  Future<void> _boostLinkIfPossible() async {
+    if (!_isConnected) return;
+    // 우선순위 HIGH
+    try {
+      await widget.writableChar.device.requestConnectionPriority(
+        connectionPriorityRequest: ConnectionPriority.high,
+      );
+      _priorityHighRequested = true;
+    } catch (_) {}
+    // MTU 재요청 (일부 단말은 연결 후에만 반영되는 경우가 있어 재요청)
+    try {
+      final mtu = await widget.writableChar.device.requestMtu(512);
+      _mtuSize = mtu;
+    } catch (_) {}
+    _linkBoosted = true;
+  }
+
   void _listenConnectionState() {
-    _connectionSub = widget.writableChar.device.state.listen((state) {
+    _connectionSub = widget.writableChar.device.state.listen((state) async {
       _isConnected = (state == BluetoothConnectionState.connected);
 
       if (_isConnected) {
+        _linkBoosted = false;
+        await _boostLinkIfPossible();
         _startSending();
         setState(() {
           _debugMessage =
@@ -168,6 +210,7 @@ class _ManualPageState extends State<ManualPage> {
         setState(() {
           _debugMessage = '❌ BLE 연결 끊김 ($state)$extra';
         });
+        _notifyAndExitWithFix('연결 실패: 다시 연결해 주세요');
       } else {
         setState(() {
           _debugMessage = 'ℹ️ BLE 상태: $state';
@@ -178,7 +221,7 @@ class _ManualPageState extends State<ManualPage> {
 
   void _startSending() {
     if (_sendTimer != null) return;
-    _sendTimer = Timer.periodic(const Duration(milliseconds: 200), (_) async {
+    _sendTimer = Timer.periodic(const Duration(milliseconds: 100), (_) async {
       if (!_isConnected || _isWriting) return;
       _isWriting = true;
       try {
@@ -190,14 +233,40 @@ class _ManualPageState extends State<ManualPage> {
   }
 
   Future<void> _sendWithAutoFormat() async {
-    final bytes = _encodeAxes(_payload);
+    // 연결 성능 튜닝이 아직이면 보장
+    if (!_linkBoosted) {
+      await _boostLinkIfPossible();
+    }
+    // 1초마다 상태 체크 로그
+    final nowForCheck = DateTime.now();
+    if (nowForCheck.difference(_lastCheckLog).inMilliseconds > 1000) {
+      _lastCheckLog = nowForCheck;
+      debugPrint('BLE LINK CHECK → NR=true, MTU=$_mtuSize, Prio=HIGH(${_priorityHighRequested ? "요청됨" : "미요청"})');
+    }
+
+    // ✅ 현재 시각(UTC)
+    final nowLocal = DateTime.now();
+    final nowUtc = nowLocal.toUtc();
+
+    // 축 값
+    final body = _encodeAxes(_payload);
+
+    // 타임스탬프 헤더(7B)
+    final hdr = _timestampHeader(nowUtc);
+
+    // 최종 패킷
+    final bytes = [...hdr, ...body];
+
     try {
       await _attemptWrite(bytes);
       _lastBleError = null;
-      setState(() {
-        _debugMessage =
-        '📤 전송 성공: ${_payload.join(", ")} → [${bytes.join(", ")}] (${bytes.length}B, fmt=$_fmt)';
-      });
+
+      // 로그
+      final hhmm = _fmtLocalHmsMs(nowLocal);
+      final secs = nowUtc.millisecondsSinceEpoch ~/ 1000;
+      final ms = nowUtc.millisecond;
+      final xyzStr = _xyzString(body);
+      debugPrint('BLE SEND @ $hhmm | utc=${secs}s+${ms}ms | $xyzStr | len=${bytes.length}B | fmt=$_fmt');
     } catch (e) {
       if (_isLenErr(e)) {
         final success = await _tryNextFormat();
@@ -208,17 +277,17 @@ class _ManualPageState extends State<ManualPage> {
     }
   }
 
+  // ✅ NR만 사용. 거부되면 안내 후 종료(폴백 없음)
   Future<void> _attemptWrite(List<int> bytes) async {
     try {
-      await widget.writableChar.write(bytes, withoutResponse: _useWriteWithoutResponse);
+      await widget.writableChar.write(bytes, withoutResponse: true);
     } on PlatformException catch (e) {
-      if (_useWriteWithoutResponse && _looksLikeNoNr(e)) {
-        await widget.writableChar.write(bytes, withoutResponse: false);
-        _useWriteWithoutResponse = false;
-        setState(() => _debugMessage = '↩️ WriteNR 실패 → Write로 전환');
-      } else {
-        rethrow;
+      if (_looksLikeNoNr(e)) {
+        _lastBleError = e.toString();
+        await _notifyAndExitWithFix('연결 실패: 기기가 write-without-response 를 지원하지 않습니다');
+        return;
       }
+      rethrow;
     }
   }
 
@@ -228,13 +297,21 @@ class _ManualPageState extends State<ManualPage> {
     _fmt = _formatFallback[_currentFormatIndex];
 
     try {
-      final newBytes = _encodeAxes(_payload);
+      final nowLocal = DateTime.now();
+      final nowUtc = nowLocal.toUtc();
+      final body = _encodeAxes(_payload);
+      final hdr = _timestampHeader(nowUtc);
+      final newBytes = [...hdr, ...body];
+
       await _attemptWrite(newBytes);
       _lastBleError = null;
-      setState(() {
-        _debugMessage =
-        '✅ 포맷 전환 성공: $_fmt → [${newBytes.join(", ")}] (${newBytes.length}B)';
-      });
+
+      final hhmm = _fmtLocalHmsMs(nowLocal);
+      final secs = nowUtc.millisecondsSinceEpoch ~/ 1000;
+      final ms = nowUtc.millisecond;
+      final xyzStr = _xyzString(body);
+      debugPrint('BLE SEND (fallback fmt=$_fmt) @ $hhmm | utc=${secs}s+${ms}ms | $xyzStr | len=${newBytes.length}B');
+
       return true;
     } catch (e) {
       if (_isLenErr(e)) {
@@ -246,7 +323,24 @@ class _ManualPageState extends State<ManualPage> {
     }
   }
 
-  // 여기 범위를 -127 ~ 127로 변경
+  // ---------- 타임스탬프 헤더(7B) ----------
+  /// 7B 헤더: [version=0x01][epoch_sec LE 4B][msec LE 2B]
+  List<int> _timestampHeader(DateTime nowUtc) {
+    final secs = nowUtc.millisecondsSinceEpoch ~/ 1000; // 32-bit
+    final ms = nowUtc.millisecond; // 0..999
+    return [
+      0x01, // version
+      secs & 0xFF,
+      (secs >> 8) & 0xFF,
+      (secs >> 16) & 0xFF,
+      (secs >> 24) & 0xFF,
+      ms & 0xFF,
+      (ms >> 8) & 0xFF,
+    ];
+  }
+
+  // ---------- 축 데이터 인코딩 ----------
+  // 범위 -127 ~ 127 유지
   List<int> _encodeAxes(List<int> axes) {
     final x = axes[0].clamp(-127, 127);
     final y = axes[1].clamp(-127, 127);
@@ -271,7 +365,28 @@ class _ManualPageState extends State<ManualPage> {
     }
   }
 
+  // ---------- 유틸(로그 포맷) ----------
   int _toInt8(int value) => value >= 0 ? (value & 0xFF) : ((256 + value) & 0xFF);
+
+  String _fmtLocalHmsMs(DateTime t) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    final ms = t.millisecond.toString().padLeft(3, '0');
+    return '${two(t.hour)}:${two(t.minute)}:${two(t.second)}.$ms';
+  }
+
+  String _xyzString(List<int> body) {
+    if (_fmt == PayloadFmt.i16x3) {
+      final x = body[0] | (body[1] << 8);
+      final y = body[2] | (body[3] << 8);
+      final z = body[4] | (body[5] << 8);
+      return 'xyz=($x,$y,$z)';
+    } else {
+      final x = body[0];
+      final y = body[1];
+      final z = body[2];
+      return 'xyz=($x,$y,$z)';
+    }
+  }
 
   bool _isLenErr(Object e) {
     final s = '$e'.toLowerCase();
@@ -292,7 +407,13 @@ class _ManualPageState extends State<ManualPage> {
   void _handleWriteError(Object e) {
     final detail = _bleErrorDetail(e);
     _lastBleError = detail;
-    setState(() => _debugMessage = '❌ 전송 실패: $detail');
+    _debugMessage = '❌ 전송 실패: $detail';
+
+    final lc = detail.toLowerCase();
+    if (lc.contains('not connected') ||
+        lc.contains('gatt') && (lc.contains('133') || lc.contains('62') || lc.contains('8') || lc.contains('19') || lc.contains('22'))) {
+      _notifyAndExitWithFix('연결 실패: 다시 연결해 주세요');
+    }
   }
 
   String _bleErrorDetail(Object e) {
@@ -348,20 +469,35 @@ class _ManualPageState extends State<ManualPage> {
         final payload = {
           'profile_id': widget.profileId.toString(),
           'previous_mode': ControlMode.manual.name,
-          // ⬇️ FIX 모드로 전환
-          'current_mode': ControlMode.fix.name, // 📌 ControlMode에 fix가 정의돼 있어야 함
+          'current_mode': ControlMode.fix.name,
         };
         mqttService.publish(topic, payload);
-        setState(() => _debugMessage = '📶 MQTT 발행 완료 → $topic $payload');
+        _debugMessage = '📶 MQTT 발행 완료 → $topic $payload';
       } else {
-        setState(() => _debugMessage = '❌ MQTT 미발행: deviceSerial 없음');
+        _debugMessage = '❌ MQTT 미발행: deviceSerial 없음';
       }
     } finally {
       if (mounted) {
-        // ⬇️ 루트로 FIX 모드 전달
         Navigator.pop(context, ControlMode.fix);
       }
     }
+  }
+
+  // ✅ 연결 실패/끊김 안내 후 FIX로 종료
+  Future<void> _notifyAndExitWithFix(String message) async {
+    if (_isExiting || !mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.redAccent,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+    await Future.delayed(const Duration(milliseconds: 1600));
+    await _exitWithFix();
   }
 
   @override
@@ -388,23 +524,7 @@ class _ManualPageState extends State<ManualPage> {
         body: SafeArea(
           child: Stack(
             children: [
-              Positioned(
-                top: 16,
-                left: 16,
-                right: 16,
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.55),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white24, width: 1),
-                  ),
-                  child: Text(
-                    _debugMessage,
-                    style: const TextStyle(color: Colors.white, fontSize: 13.5),
-                  ),
-                ),
-              ),
+              // 좌측 XZ 조이스틱
               Positioned(
                 left: 28,
                 bottom: 28,
@@ -416,6 +536,8 @@ class _ManualPageState extends State<ManualPage> {
                   ),
                 ),
               ),
+
+              // 우측 Y 조이스틱
               Positioned(
                 right: 28,
                 bottom: 28,
@@ -427,6 +549,8 @@ class _ManualPageState extends State<ManualPage> {
                   ),
                 ),
               ),
+
+              // 뒤로가기(항상 수동 FIX 종료)
               Positioned(
                 top: 16,
                 left: 16,

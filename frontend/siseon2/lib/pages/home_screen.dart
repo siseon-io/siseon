@@ -985,6 +985,29 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             ),
                           ),
                           // ⚙️ 프로필 수정
+                          // ...중략 (헤더 Row 내부 아바타/이름 오른쪽 영역)
+
+// ❓ 튜토리얼 다시보기  ← 먼저
+                          IconButton(
+                            icon: const Icon(Icons.help_outline, color: Colors.white),
+                            tooltip: '튜토리얼 보기',
+                            onPressed: () async {
+                              final pid = (_profile?['id'] ?? _profile?['profileId']) as int?;
+                              if (pid == null) return;
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => TutorialScreen(profileId: pid, fromMenu: true),
+                                ),
+                              );
+                            },
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                          ),
+
+                          const SizedBox(width: 6),
+
+// ⚙️ 프로필 수정  ← 그 다음
                           IconButton(
                             icon: const Icon(Icons.settings, color: Colors.white),
                             onPressed: () async {
@@ -1013,24 +1036,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                               }
 
                               await _refreshSilently();
-                            },
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                          ),
-                          const SizedBox(width: 6),
-                          // ❓ 튜토리얼 다시보기
-                          IconButton(
-                            icon: const Icon(Icons.help_outline, color: Colors.white),
-                            tooltip: '튜토리얼 보기',
-                            onPressed: () async {
-                              final pid = (_profile?['id'] ?? _profile?['profileId']) as int?;
-                              if (pid == null) return;
-                              await Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => TutorialScreen(profileId: pid, fromMenu: true),
-                                ),
-                              );
                             },
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(),

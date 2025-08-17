@@ -15,7 +15,7 @@ class PresetSaveException implements Exception {
 }
 
 class PresetService {
-  static const String baseUrl = 'https://i13b101.p.ssafy.io/siseon';
+  static const String _baseUrl = 'https://i13b101.p.ssafy.io/siseon';
 
   // ────────────────────────────────────────────────────────────────────────────
   // 공통 유틸
@@ -91,7 +91,7 @@ class PresetService {
     final token = await AuthService.getValidAccessToken();
     if (token == null) return [];
 
-    final url = Uri.parse('$baseUrl/api/preset/profile/$profileId');
+    final url = Uri.parse('$_baseUrl/api/preset/profile/$profileId');
     final response = await http.get(url, headers: _headers(token, json: false));
 
     if (response.statusCode == 200) {
@@ -123,7 +123,7 @@ class PresetService {
       throw PresetSaveException('unauthorized', '로그인이 필요합니다.');
     }
 
-    final url = Uri.parse('$baseUrl/api/preset');
+    final url = Uri.parse('$_baseUrl/api/preset');
     final res = await http.post(
       url,
       headers: _headers(token),
@@ -155,7 +155,7 @@ class PresetService {
 
     // 1) /confirm
     final r1 = await http.post(
-      Uri.parse('$baseUrl/api/preset/confirm'),
+      Uri.parse('$_baseUrl/api/preset/confirm'),
       headers: headers,
       body: payload,
     );
@@ -164,7 +164,7 @@ class PresetService {
     // 2) 구버전 서버 → /preset
     if (r1.statusCode == 404 || r1.statusCode == 405) {
       final r2 = await http.post(
-        Uri.parse('$baseUrl/api/preset'),
+        Uri.parse('$_baseUrl/api/preset'),
         headers: headers,
         body: payload,
       );
@@ -186,7 +186,7 @@ class PresetService {
     final token = await AuthService.getValidAccessToken();
     if (token == null) return false;
 
-    final url = Uri.parse('$baseUrl/api/preset/$presetId');
+    final url = Uri.parse('$_baseUrl/api/preset/$presetId');
     final res = await http.put(
       url,
       headers: _headers(token),
@@ -205,7 +205,7 @@ class PresetService {
     final token = await AuthService.getValidAccessToken();
     if (token == null) return false;
 
-    final url = Uri.parse('$baseUrl/api/preset/$presetId');
+    final url = Uri.parse('$_baseUrl/api/preset/$presetId');
     final res = await http.put(
       url,
       headers: _headers(token),
@@ -223,7 +223,7 @@ class PresetService {
     final token = await AuthService.getValidAccessToken();
     if (token == null) return false;
 
-    final url = Uri.parse('$baseUrl/api/preset/$presetId');
+    final url = Uri.parse('$_baseUrl/api/preset/$presetId');
     final res = await http.delete(url, headers: _headers(token, json: false));
     return res.statusCode == 200 || res.statusCode == 204;
   }

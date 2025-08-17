@@ -31,14 +31,15 @@ class _BleScanScreenState extends State<BleScanScreen> {
 
   final Map<String, BluetoothDevice> _foundDevices = {};
   final Map<String, List<Guid>> _serviceUuids = {};
-
   final List<String> _logs = [];
+
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _writableChar;
 
   bool _isScanning = false;
   bool _busy = false; // ✅ 연결 중 오버레이 표시용
   int _connectAttempt = 0; // ✅ 재시도 카운트(표시는 안 함)
+
   StreamSubscription<List<ScanResult>>? _scanSub;
   StreamSubscription<bool>? _isScanningSub;
   StreamSubscription<BluetoothConnectionState>? _connStateSub;
@@ -71,7 +72,6 @@ class _BleScanScreenState extends State<BleScanScreen> {
           if (name.toLowerCase().contains('pi5')) {
             _foundDevices[mac] = r.device;
             _serviceUuids[mac] = r.advertisementData.serviceUuids;
-
             final adv = r.advertisementData.serviceUuids
                 .map((g) => g.toString().toLowerCase())
                 .toList();
@@ -90,13 +90,14 @@ class _BleScanScreenState extends State<BleScanScreen> {
     _logs.clear();
     _connectedDevice = null;
     _writableChar = null;
-
     try {
       await FlutterBluePlus.stopScan();
       // ✅ 스캔 5초
       await FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
     } catch (e) {
       _addLog('❌ startScan error: ${_formatBleError(e)}');
+      // 스캔 자체가 죽은 경우도 사용자에게 안내 후 뒤로가기 처리 원하면 아래 활성화
+      // _notifyAndGoBack('스캔 오류: 다시 연결해 주세요');
     }
   }
 
@@ -144,6 +145,7 @@ class _BleScanScreenState extends State<BleScanScreen> {
 
     try {
       await _stopScan();
+
       final device = _foundDevices[mac];
       if (device == null) return;
 
@@ -155,7 +157,8 @@ class _BleScanScreenState extends State<BleScanScreen> {
       if (advUuids.isEmpty) {
         _addLog('📣 ADV.serviceUuids = [] (광고에 UUID 미포함/OS 캐시 이슈 가능)');
       } else {
-        final advList = advUuids.map((g) => g.toString().toLowerCase()).toList();
+        final advList =
+        advUuids.map((g) => g.toString().toLowerCase()).toList();
         _addLog('📣 ADV.serviceUuids = [${advList.join(', ')}]');
         advSvcHint = _pickCustomAdvSvc(advUuids);
         if (advSvcHint != null) {
@@ -178,10 +181,9 @@ class _BleScanScreenState extends State<BleScanScreen> {
       for (int attempt = 1; attempt <= maxAttempts; attempt++) {
         _connectAttempt = attempt;
         if (mounted) setState(() {}); // (UI에는 표시 안 함)
-
         _addLog('🔁 Connect attempt $attempt/$maxAttempts');
-        final result = await _tryConnect(device, wantChar, advSvcHint);
 
+        final result = await _tryConnect(device, wantChar, advSvcHint);
         if (result != null) {
           try {
             await bleSession.setConnected(
@@ -192,9 +194,7 @@ class _BleScanScreenState extends State<BleScanScreen> {
           } catch (_) {}
 
           if (!mounted) return;
-
           _handoff = true;
-
           Navigator.pop(context, {
             'device': result['device'],
             'writableChar': result['writableChar'],
@@ -212,10 +212,10 @@ class _BleScanScreenState extends State<BleScanScreen> {
         }
       }
 
-      // 모두 실패
+      // 모두 실패 → 사용자 알림 후 뒤로가기
       await _safeDisconnect(device);
       if (!mounted) return;
-      _showConnectFailDialog();
+      _showConnectFailSnackAndBack(); // ✅ 요구사항 1
     } finally {
       _setBusy(false);
     }
@@ -236,7 +236,8 @@ class _BleScanScreenState extends State<BleScanScreen> {
           );
           _addLog('✅ Connected');
         } on PlatformException catch (e) {
-          _addLog('❌ Connection failed (PlatformException): ${_formatPlatformException(e)}');
+          _addLog(
+              '❌ Connection failed (PlatformException): ${_formatPlatformException(e)}');
           return null;
         } catch (e) {
           _addLog('❌ Connection failed: ${_formatBleError(e)}');
@@ -268,13 +269,14 @@ class _BleScanScreenState extends State<BleScanScreen> {
               '(${s.characteristics.length} chars)');
           for (final c in s.characteristics) {
             final p = c.properties;
-            _addLog('   └─ Char: ${c.uuid.toString().toLowerCase()} '
+            _addLog(' └─ Char: ${c.uuid.toString().toLowerCase()} '
                 '[read=${p.read}, write=${p.write}, writeNR=${p.writeWithoutResponse}, '
                 'notify=${p.notify}, indicate=${p.indicate}]');
           }
         }
       } on PlatformException catch (e) {
-        _addLog('❌ discoverServices failed (PlatformException): ${_formatPlatformException(e)}');
+        _addLog(
+            '❌ discoverServices failed (PlatformException): ${_formatPlatformException(e)}');
         return null;
       } catch (e) {
         _addLog('❌ discoverServices failed: ${_formatBleError(e)}');
@@ -285,10 +287,9 @@ class _BleScanScreenState extends State<BleScanScreen> {
       BluetoothCharacteristic? chosen;
       try {
         List<BluetoothService> preferredServices = [];
-
         if (advSvcHint != null) {
-          final match = services.where(
-                  (s) => s.uuid.toString().toLowerCase() == advSvcHint);
+          final match = services
+              .where((s) => s.uuid.toString().toLowerCase() == advSvcHint);
           preferredServices.addAll(match);
         }
         if (preferredServices.isEmpty) {
@@ -311,7 +312,7 @@ class _BleScanScreenState extends State<BleScanScreen> {
           for (final c in s.characteristics) {
             final uuidLower = c.uuid.toString().toLowerCase();
             final canWrite = c.properties.write || c.properties.writeWithoutResponse;
-            final canRead  = c.properties.read;
+            final canRead = c.properties.read;
 
             if (wantChar != null && wantChar.isNotEmpty) {
               if (uuidLower == wantChar && canWrite) {
@@ -331,14 +332,13 @@ class _BleScanScreenState extends State<BleScanScreen> {
         }
 
         chosen ??= bestReadableWritable ?? bestWritable;
-
         if (chosen == null) {
           _addLog('⚠️ 쓸 수 있는 특성을 찾지 못했습니다. (write/read 속성 확인 필요)');
           return null;
         }
 
         final p = chosen.properties;
-        final svcUuid  = chosen.serviceUuid.toString().toLowerCase();
+        final svcUuid = chosen.serviceUuid.toString().toLowerCase();
         final charUuid = chosen.uuid.toString().toLowerCase();
 
         _addLog('✅ Selected service: $svcUuid');
@@ -350,7 +350,6 @@ class _BleScanScreenState extends State<BleScanScreen> {
         _addLog(verified ? '🔒 Link verify: OK' : '⚠️ Link verify: skipped or best-effort');
 
         _writableChar = chosen;
-
         return {
           'device': device,
           'writableChar': chosen,
@@ -390,6 +389,7 @@ class _BleScanScreenState extends State<BleScanScreen> {
         _addLog('⚠️ Notify probe failed: ${_formatBleError(e)}');
       }
     }
+
     return false;
   }
 
@@ -414,10 +414,8 @@ class _BleScanScreenState extends State<BleScanScreen> {
     final statusFromDetails = _extractGattStatus('${e.details}');
     final statusFromMessage = _extractGattStatus('${e.message}');
     final status = statusFromDetails ?? statusFromMessage;
-
     final base = '[${e.code}] ${e.message ?? ''} ${e.details ?? ''}'.trim();
     if (status == null) return base;
-
     final hint = _gattHint(status);
     return '$base (status=$status${hint != null ? ", $hint" : ""})';
   }
@@ -464,25 +462,28 @@ class _BleScanScreenState extends State<BleScanScreen> {
     setState(() => _busy = v);
   }
 
-  void _showConnectFailDialog() {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppColors.cardGrey,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: const Text('기기 연결 실패', style: TextStyle(color: AppColors.text, fontWeight: FontWeight.w700)),
-        content: const Text(
-          '기기 연결에 실패했습니다.\n다시 스캔 후 재시도해주세요.',
-          style: TextStyle(color: AppColors.textSub),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('확인', style: TextStyle(color: Colors.white)),
-          )
-        ],
+  /// ✅ 요구사항 (1): 실패 알림 + 뒤로가기
+  void _showConnectFailSnackAndBack() {
+    _notifyAndGoBack('연결 실패: 다시 연결해 주세요');
+  }
+
+  Future<void> _notifyAndGoBack(String message) async {
+    if (!mounted) return;
+    // 스낵바 표시
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: Colors.redAccent,
+        duration: const Duration(seconds: 2),
       ),
     );
+    // 잠깐 보여준 뒤 뒤로가기(홈)
+    await Future.delayed(const Duration(milliseconds: 1700));
+    if (!mounted) return;
+    Navigator.of(context).pop();
   }
 
   @override
@@ -501,102 +502,112 @@ class _BleScanScreenState extends State<BleScanScreen> {
   Widget build(BuildContext context) {
     final bool blockAll = _isScanning || _busy;
 
-    return Scaffold(
-      backgroundColor: AppColors.backgroundBlack,
-      appBar: AppBar(
+    return WillPopScope(
+      // ✅ 요구사항 (2): 스캔/연결 중엔 뒤로가기 차단
+      onWillPop: () async => !(_isScanning || _busy),
+      child: Scaffold(
         backgroundColor: AppColors.backgroundBlack,
-        elevation: 0,
-        centerTitle: true,
-        foregroundColor: Colors.white,
-        iconTheme: const IconThemeData(color: Colors.white, size: 22),
-        title: const Text(
-          '모니터 암 기기 탐색',
-          style: TextStyle(
-            color: AppColors.text,
-            fontFamily: 'Pretendard',
-            fontWeight: FontWeight.w700,
+        appBar: AppBar(
+          backgroundColor: AppColors.backgroundBlack,
+          elevation: 0,
+          centerTitle: true,
+          foregroundColor: Colors.white,
+          iconTheme: const IconThemeData(color: Colors.white, size: 22),
+          // ✅ 뒤로가기 버튼 자체도 비활성화
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: blockAll ? null : () => Navigator.of(context).pop(),
           ),
+          title: const Text(
+            '모니터 암 기기 탐색',
+            style: TextStyle(
+              color: AppColors.text,
+              fontFamily: 'Pretendard',
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          actions: [
+            IconButton(
+              tooltip: _isScanning ? '스캔 중' : '스캔 시작',
+              icon: Icon(
+                _isScanning ? Icons.stop_circle_outlined : Icons.refresh,
+                color: Colors.white70,
+              ),
+              onPressed: (blockAll) ? null : () => _startScan(),
+            ),
+          ],
         ),
-        actions: [
-          IconButton(
-            tooltip: _isScanning ? '스캔 중' : '스캔 시작',
-            icon: Icon(
-              _isScanning ? Icons.stop_circle_outlined : Icons.refresh,
-              color: Colors.white70,
-            ),
-            onPressed: (blockAll) ? null : () => _startScan(),
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          IgnorePointer(
-            ignoring: blockAll, // ✅ 스캔/연결 중 전체 인터랙션 차단
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: _deviceListView(),
-            ),
-          ),
-
-          // ✅ 연결 중 오버레이 (시도 횟수 표시는 제거)
-          if (_busy)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black54,
-                child: const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 36,
-                        height: 36,
-                        child: CircularProgressIndicator(strokeWidth: 3),
-                      ),
-                      SizedBox(height: 12),
-                      Text(
-                        '기기 연결 중…',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                      ),
-                    ],
-                  ),
-                ),
+        body: Stack(
+          children: [
+            IgnorePointer(
+              ignoring: blockAll, // ✅ 스캔/연결 중 전체 인터랙션 차단
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: _deviceListView(),
               ),
             ),
 
-          // ✅ 스캔 중 오버레이
-          if (_isScanning && !_busy)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black54,
-                child: const Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      SizedBox(
-                        width: 36,
-                        height: 36,
-                        child: CircularProgressIndicator(strokeWidth: 3),
-                      ),
-                      SizedBox(height: 12),
-                      Text(
-                        '기기 탐색중입니다…',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                      ),
-                    ],
+            // ✅ 연결 중 오버레이
+            if (_busy)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black54,
+                  child: const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 36,
+                          height: 36,
+                          child: CircularProgressIndicator(strokeWidth: 3),
+                        ),
+                        SizedBox(height: 12),
+                        Text(
+                          '기기 연결 중…',
+                          style: TextStyle(
+                              color: Colors.white, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-        ],
+
+            // ✅ 스캔 중 오버레이
+            if (_isScanning && !_busy)
+              Positioned.fill(
+                child: Container(
+                  color: Colors.black54,
+                  child: const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 36,
+                          height: 36,
+                          child: CircularProgressIndicator(strokeWidth: 3),
+                        ),
+                        SizedBox(height: 12),
+                        Text(
+                          '기기 탐색중입니다…',
+                          style: TextStyle(
+                              color: Colors.white, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        // ✅ 하단 바/스피너 완전 제거
+        // bottomNavigationBar: null,
       ),
-      // ✅ 하단 바/스피너 완전 제거
-      // bottomNavigationBar: null,
     );
   }
 
   Widget _deviceListView() {
     final devices = _foundDevices.entries.toList();
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -624,6 +635,7 @@ class _BleScanScreenState extends State<BleScanScreen> {
           ),
         ),
         const SizedBox(height: 16),
+
         if (devices.isEmpty)
           Expanded(child: _emptyState())
         else
@@ -661,7 +673,8 @@ class _BleScanScreenState extends State<BleScanScreen> {
                           decoration: BoxDecoration(
                             color: AppColors.primaryBlue.withOpacity(0.15),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: AppColors.primaryBlue.withOpacity(0.35), width: 1),
+                            border: Border.all(
+                                color: AppColors.primaryBlue.withOpacity(0.35), width: 1),
                           ),
                           child: const Icon(Icons.bluetooth, color: AppColors.primaryBlue),
                         ),
@@ -747,9 +760,9 @@ class _BleScanScreenState extends State<BleScanScreen> {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: Colors.white.withOpacity(0.12), width: 1),
         ),
-        child: Column(
+        child: const Column(
           mainAxisSize: MainAxisSize.min,
-          children: const [
+          children: [
             Icon(Icons.search, color: AppColors.primaryBlue, size: 40),
             SizedBox(height: 12),
             Text(
