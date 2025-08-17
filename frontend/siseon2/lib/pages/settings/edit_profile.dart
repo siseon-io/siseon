@@ -8,6 +8,7 @@ import '../../services/auth_service.dart';
 import '../../profile_select_screen.dart';
 import '../../services/profile_cache_service.dart';
 import 'dart:math' as math;
+
 /// 🎨 공통 색상
 class AppColors {
   static const background = Color(0xFF0D1117); // 전체 배경
@@ -17,6 +18,23 @@ class AppColors {
   static const text = Colors.white;
   static const textSub = Colors.white70;
   static const textHint = Colors.white38;
+}
+
+/// ✅ 시력 입력 전용 포매터
+/// - 맨 앞의 '-' 0~1개 허용
+/// - 숫자, '.' 0~1개 허용
+/// - 편집 중 공란/단일 '-'도 허용(타이핑 자연스럽게)
+class _SignedDecimalFormatter extends TextInputFormatter {
+  final RegExp _regex = RegExp(r'^-?\d*\.?\d*$');
+  @override
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldValue, TextEditingValue newValue) {
+    final t = newValue.text;
+    if (t.isEmpty || t == '-' || _regex.hasMatch(t)) {
+      return newValue;
+    }
+    return oldValue;
+  }
 }
 
 class EditProfilePage extends StatefulWidget {
@@ -282,29 +300,24 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // ✅ 반응형 그리드
-                // ✅ 3칸 고정 + 스크롤 (2줄 노출은 시트 높이로 제어)
                 Expanded(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      const int crossAxisCount = 3;     // ✅ 항상 3칸
-                      const double spacing = 12;        // ✅ 동일 간격
+                      const int crossAxisCount = 3;
+                      const double spacing = 12;
                       final double maxW = constraints.maxWidth;
 
                       final double tileWidth =
                           (maxW - spacing * (crossAxisCount - 1)) / crossAxisCount;
 
-                      // ✅ 원(외곽 포함) 지름을 동일 cap으로
                       final double avatarOuter = math.min(tileWidth, 84);
                       const double borderSelected = 3;
                       const double borderNormal = 1;
-
                       final double tileExtent = avatarOuter + 4;
 
                       return GridView.builder(
                         padding: EdgeInsets.zero,
-                        physics: const ClampingScrollPhysics(), // 스크롤 가능
+                        physics: const ClampingScrollPhysics(),
                         primary: false,
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: crossAxisCount,
@@ -315,13 +328,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
                         itemCount: 1 + _avatarAssets.length, // +1: '없음'
                         itemBuilder: (context, index) {
                           final String? path = (index == 0) ? null : _avatarAssets[index - 1];
-                          final bool isSelected = path == _selectedImage /* or _selectedAvatar */;
+                          final bool isSelected = path == _selectedImage;
                           final double borderWidth = isSelected ? borderSelected : borderNormal;
                           final double radius = avatarOuter / 2 - borderWidth;
 
                           return GestureDetector(
                             onTap: () {
-                              setState(() => _selectedImage /* or _selectedAvatar */ = path);
+                              setState(() => _selectedImage = path);
                               Navigator.pop(ctx);
                             },
                             child: Column(
@@ -361,18 +374,19 @@ class _EditProfilePageState extends State<EditProfilePage> {
       },
     );
   }
+
   Future<void> _save() async {
     final t = await AuthService.getValidAccessToken();
     if (t == null || _profileId == null) return;
 
-    final body = jsonEncode({
+    final payload = {
       "name": _nameController.text.trim(),
       "height": double.tryParse(_heightController.text.trim()),
       "birthDate": _birthDate?.toIso8601String(),
       "leftVision": double.tryParse(_visionLeftController.text.trim()),
       "rightVision": double.tryParse(_visionRightController.text.trim()),
-      "imageUrl": _selectedImage,
-    });
+      "imageUrl": _selectedImage, // assets 경로 또는 null
+    };
 
     final res = await http.put(
       Uri.parse('https://i13b101.p.ssafy.io/siseon/api/profile/$_profileId'),
@@ -380,16 +394,44 @@ class _EditProfilePageState extends State<EditProfilePage> {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer $t',
       },
-      body: body,
+      body: jsonEncode(payload),
     );
 
     if (!mounted) return;
 
     if (res.statusCode == 200) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('프로필이 저장되었습니다.')));
-      Navigator.pop(context);
+      Map<String, dynamic> fromServer = {};
+      try {
+        final js = jsonDecode(utf8.decode(res.bodyBytes));
+        if (js is Map<String, dynamic>) fromServer = js;
+      } catch (_) {}
+
+      final cached = await ProfileCacheService.loadProfile() ?? {};
+      final updated = <String, dynamic>{
+        ...cached,
+        ...fromServer,
+        'id': _profileId,
+        'profileId': _profileId,
+        'name': payload['name'],
+        'height': payload['height'],
+        'leftVision': payload['leftVision'],
+        'rightVision': payload['rightVision'],
+        'birthDate': _birthDate != null
+            ? DateFormat('yyyy-MM-dd').format(_birthDate!)
+            : (fromServer['birthDate'] ?? cached['birthDate']),
+        'imageUrl': payload['imageUrl'],
+      };
+
+      await ProfileCacheService.saveProfile(updated);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('프로필이 저장되었습니다.')),
+      );
+      Navigator.pop(context, updated);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('수정 실패: ${res.statusCode}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('수정 실패: ${res.statusCode}')),
+      );
     }
   }
 
@@ -527,7 +569,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   alignment: Alignment.center,
                   children: [
                     CircleAvatar(
-                      radius: 50, // ✅ 생성 화면과 동일
+                      radius: 50,
                       backgroundColor: const Color(0xFF1F2937),
                       backgroundImage: _selectedImage != null ? AssetImage(_selectedImage!) : null,
                       child: _selectedImage == null
@@ -578,10 +620,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   child: _buildField(
                     _visionLeftController,
                     '좌안 시력',
-                    '예: 1.0',
+                    '예: -0.75',
                     Icons.remove_red_eye,
-                    const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                    const TextInputType.numberWithOptions(signed: true, decimal: true), // ✅
+                    inputFormatters: [_SignedDecimalFormatter()], // ✅
                   ),
                 ),
                 const SizedBox(width: 16),
@@ -589,10 +631,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
                   child: _buildField(
                     _visionRightController,
                     '우안 시력',
-                    '예: 1.0',
+                    '예: -0.75',
                     Icons.remove_red_eye_outlined,
-                    const TextInputType.numberWithOptions(decimal: true),
-                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                    const TextInputType.numberWithOptions(signed: true, decimal: true), // ✅
+                    inputFormatters: [_SignedDecimalFormatter()], // ✅
                   ),
                 ),
               ],
@@ -627,13 +669,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
       String hint,
       IconData icon,
       TextInputType kt, {
-        List<TextInputFormatter>? inputFormatters, // ✅ 추가
+        List<TextInputFormatter>? inputFormatters,
       }) {
     return TextField(
       controller: c,
       style: const TextStyle(color: AppColors.text),
       keyboardType: kt,
-      inputFormatters: inputFormatters,        // ✅ 추가
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(
         filled: true,
         fillColor: AppColors.card,

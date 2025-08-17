@@ -333,7 +333,8 @@ class _ManualPageState extends State<ManualPage> {
 
   double _applyDeadzone(double v, [double t = 0.08]) => v.abs() < t ? 0.0 : v;
 
-  Future<void> _exitWithAuto() async {
+  // 🔁 뒤로가기 시 FIX 모드로 전환
+  Future<void> _exitWithFix() async {
     if (_isExiting) return;
     _isExiting = true;
 
@@ -347,7 +348,8 @@ class _ManualPageState extends State<ManualPage> {
         final payload = {
           'profile_id': widget.profileId.toString(),
           'previous_mode': ControlMode.manual.name,
-          'current_mode': ControlMode.auto.name,
+          // ⬇️ FIX 모드로 전환
+          'current_mode': ControlMode.fix.name, // 📌 ControlMode에 fix가 정의돼 있어야 함
         };
         mqttService.publish(topic, payload);
         setState(() => _debugMessage = '📶 MQTT 발행 완료 → $topic $payload');
@@ -356,7 +358,8 @@ class _ManualPageState extends State<ManualPage> {
       }
     } finally {
       if (mounted) {
-        Navigator.pop(context, ControlMode.auto);
+        // ⬇️ 루트로 FIX 모드 전달
+        Navigator.pop(context, ControlMode.fix);
       }
     }
   }
@@ -378,7 +381,7 @@ class _ManualPageState extends State<ManualPage> {
       canPop: false,
       onPopInvoked: (didPop) async {
         if (didPop) return;
-        await _exitWithAuto();
+        await _exitWithFix();
       },
       child: Scaffold(
         backgroundColor: const Color(0xFF0D1117),
@@ -430,7 +433,7 @@ class _ManualPageState extends State<ManualPage> {
                 child: IconButton(
                   icon: const Icon(Icons.arrow_back, color: Colors.white, size: 26),
                   onPressed: () async {
-                    await _exitWithAuto();
+                    await _exitWithFix();
                   },
                 ),
               ),
