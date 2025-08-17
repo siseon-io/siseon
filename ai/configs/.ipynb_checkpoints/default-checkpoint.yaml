@@ -1,0 +1,77 @@
+# configs/default.yaml
+
+# ======================
+# 공통 설정
+# ======================
+common:
+  seed: 42
+  gpu_id: 0
+  paths:
+    output_root: 'runs'
+
+# ======================
+# 포즈 추정 설정
+# ======================
+pose:
+  dataset_yaml: 'pose_estimation/data/FLIC_yolo/flic_upperbody.yaml'
+  weights: 'yolo11n-pose.pt'
+  epochs: 200
+  imgsz: 640
+  batch: 16
+  freeze: 10
+  optimizer: 'AdamW'
+  project_name: 'pose'
+  run_name: 'flic_upperbody_y11n'
+
+# ======================
+# 시선 추적(학습/사전학습) 설정
+# ======================
+gaze:
+  data:
+    api_key: 'MF8Wd7JxbRUZSmQTC9fw'
+    workspace: 'eye-annotations-yolo-to-voc'
+    project_name: 'eye-detection-kso3d'
+    version: 4
+    data_fmt: 'yolov11'
+  pretrain:
+    api_key: 'MF8Wd7JxbRUZSmQTC9fw'
+    workspace: 'iseeds-workspace'
+    project_name: 'iseeds'
+    version: 8
+    data_fmt: 'yolov11'
+    img_size: 640
+    batch_size: 16
+    workers: 4
+    epochs: 500
+
+# ======================
+# 모델 설정
+# ======================
+model:
+  name: 'yolo11n.pt'
+  epochs: 500
+  img_size: 416
+  batch_size: 16
+  workers: 4
+
+# ======================
+# 추론/인퍼런스 설정
+# ======================
+inference:
+  conf_thresh: 0.25           # gaze 모델 confidence threshold
+  webcam_index: 0             # 사용할 웹캠 인덱스
+  cam_width: 640              # 캡처 프레임 너비
+  cam_height: 480             # 캡처 프레임 높이
+  weights: 'weights/best_gaze.pt'      # gaze 모델 weights 위치
+  pose_weights: 'weights/best_pose.pt' # pose 모델 weights 위치
+
+# ======================
+# 하이퍼파라미터 최적화
+# ======================
+hpo:
+  n_trials: 20
+  timeout: 3600
+  trial_epochs: 1
+  pruner:
+    type: median
+    warmup_steps: 5

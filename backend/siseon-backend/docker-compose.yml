@@ -1,0 +1,41 @@
+version: '3.9'
+
+services:
+  db:
+    image: mysql:8.0.36
+    container_name: siseon-db
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Seoul
+      JAVA_TOOL_OPTIONS: "-Duser.timezone=Asia/Seoul"
+      MYSQL_USER: ${DB_USER}
+      MYSQL_PASSWORD: ${DB_PASS}
+    command: --default-time-zone=Asia/Seoul
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - siseon-net
+    ports:
+      - "3306:3306"
+
+  backend:
+    build: .
+    container_name: siseon-was
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      TZ: Asia/Seoul
+    depends_on:
+      - db
+    networks:
+      - siseon-net
+    ports:
+      - "8080:8080"
+
+volumes:
+  db_data:
+
+networks:
+  siseon-net:
+    external: true

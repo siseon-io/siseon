@@ -1,0 +1,56 @@
+server:
+  port: 8080
+
+spring:
+  batch:
+    jdbc:
+      initialize-schema: always
+    datasource:
+      url: jdbc:mysql://${BATCH_DB_HOST:localhost}:3306/${BATCH_DB_NAME:batch}?useSSL=false&serverTimezone=Asia/Seoul&allowPublicKeyRetrieval=true
+      username: ${BATCH_DB_USER}
+      password: ${BATCH_DB_PASS}
+      driver-class-name: com.mysql.cj.jdbc.Driver
+
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:3306/${DB_NAME:siseon}?useSSL=false&serverTimezone=Asia/Seoul&allowPublicKeyRetrieval=true
+    username: ${DB_USER}
+    password: ${DB_PASS}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.MySQLDialect
+
+  mqtt:
+    host: tcp://i13b101.p.ssafy.io:1883
+    client-id: siseon-backend
+    username: ${MQTT_USER}
+    password: ${MQTT_PASS}
+
+app:
+  oauth2:
+    google:
+      userinfo-uri: https://www.googleapis.com/oauth2/v3/userinfo
+
+  jwt:
+    secret: ${APP_JWT_SECRET}
+
+logging:
+  level:
+    org.springframework.security: DEBUG
+
+firebase:
+  service-account-file: classpath:firebase/serviceAccountKey.json
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    urls:
+      - name: SISEON API
+        url: /v3/api-docs

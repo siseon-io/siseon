@@ -1,0 +1,74 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.5.3'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'siseon.backend'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // ▶ Spring Web
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    // ▶ Spring Websocket
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+    // ▶ Spring Security
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    // ▶ JWT Encoder/Decoder
+    implementation 'org.springframework.security:spring-security-oauth2-jose'
+    // ▶ Auth & Resource Server
+    implementation 'org.springframework.security:spring-security-oauth2-authorization-server'
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+    // ▶ WebClient (Google UserInfo API)
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+    // ▶ JPA + MySQL
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    runtimeOnly 'com.mysql:mysql-connector-j'
+    // ▶ Spring Batch
+    implementation 'org.springframework.boot:spring-boot-starter-batch'
+    implementation 'org.springframework.batch:spring-batch-core'
+    // ▶ JSON Serialization
+    implementation 'com.fasterxml.jackson.core:jackson-databind'
+    // ▶ Boilerplate
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    // ▶ Validate
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // ▶ MQTT Integration
+    implementation 'org.springframework.boot:spring-boot-starter-integration'
+    implementation 'org.springframework.integration:spring-integration-mqtt'
+    implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
+    // ▶ Test
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'io.projectreactor:reactor-test'
+    testImplementation 'org.springframework.security:spring-security-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    // ▶ Swagger
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.2.0'
+    // ▶ Firebase
+    implementation 'com.google.firebase:firebase-admin:9.2.0'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
+
+bootJar {
+    mainClass = 'siseon.backend.SiseonBackendApplication'
+}
