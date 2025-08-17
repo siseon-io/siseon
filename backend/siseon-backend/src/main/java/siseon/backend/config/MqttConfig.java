@@ -56,6 +56,7 @@ public class MqttConfig {
         MqttPahoMessageHandler handler =
                 new MqttPahoMessageHandler(clientId + "_pub_preset", factory);
         handler.setAsync(true);
+        handler.setDefaultQos(1);
         // setDefaultTopic 제거 → 발행 시점에 MqttHeaders.TOPIC 설정
         return handler;
     }
