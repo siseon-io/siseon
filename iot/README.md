@@ -1,9 +1,9 @@
-# 📦 IoT: Pi5 제어 모듈 및 펌웨어
+# IoT: Pi5 제어 모듈 및 펌웨어
 
 Raspberry Pi 5 기반의 제어 모듈 및 펑웨어 소스코드를 포함한 디렉토리입니다.
 5축 로봇 팔을 **실시간 제어**하며, Jetson AI 모듈과 Spring API 서버와 연동하여 사용자의 자세에 맞는 **인체공학적 디스플레이 위치 자동 조정 기능**을 수행합니다.
 
-> ✅ **ROS2 기반 분산 제어 시스템으로 구성**
+> **ROS2 기반 분산 제어 시스템으로 구성**
 
 ---
 
@@ -14,13 +14,12 @@ Raspberry Pi 5 기반의 제어 모듈 및 펑웨어 소스코드를 포함한 �
 ```
 ros2_ws/src/
 ├── control_bridge_node/     # MQTT-ROS2 브리지 (제어 모드 수신)
-├── fusion_node/             # 센서 데이터 융합 및 자세 결정 (🚧 개발중)
+├── fusion_node/             # 센서 데이터 융합 및 자세 결정 
 ├── arm_control_node/        # 모니터 암 제어 (최종 명령 실행)
-├── eye_pos_node/            # 눈 위치 추적 (UDP 소켓으로 Jetson 데이터 수신)
-├── lidar_node/              # LiDAR 센서 거리 데이터 수집
+├── eye_pose_node/           # 눈 위치 추적 (UDP 소켓으로 Jetson 데이터 수신)
 ├── preset_bridge_node/      # 프리셋 관리 (MQTT 연동)
-├── manual_bt_node/          # 수동 블루투스 제어 (🚧 개발중)
-└── pairing_bridge_node/     # 디바이스 페어링 (MQTT 연동, 🚧 개발중)
+├── manual_bt_node/          # 수동 블루투스 제어 
+└── pairing_bridge_node/     # 디바이스 페어링 (MQTT 연동)
 ```
 
 ### 통신 방식
@@ -112,91 +111,106 @@ ros2 run control_bridge_node control_bridge_node
 | 토픽명                           | 발행자              | 구독자              | 설명                    |
 | ------------------------------- | ------------------ | ------------------ | ---------------------- |
 | `/control_mode/{device_id}`     | Spring/Flutter     | control_bridge_node | 제어 모드 수신 (auto/manual/preset) |
-| `/control_mode/{profile_id}`           | control_bridge_node | Spring/Flutter     | Pi5 상태 정보 전송        |
 | `/request_pair/{device_id}`     | Spring/Flutter |   pairing_bridge_node   | 디바이스 페어링 요청       |
 | `/preset_coordinate/{device_id}` | Spring/Flutter     | preset_bridge_node | 프리셋 좌표 저장/로드 요청  |
+
+### /request_pair/{device_id}
+
+```json
+{
+  "profile_id": string
+}
+```
+
+### /preset_coordinate/{device_id}
+
+```json
+{
+	"profileId": string
+  "lefteyeX": float,
+  "lefteyeY": float,
+  "lefteyeZ": float,
+  "righteyeX": float,
+  "righteyeY": float,
+  "righteyeZ": float,
+}
+```
+
+### /control_mode/{device_id}
+
+```json
+{
+  "profile_id": string
+  "previous_mode": sring
+  "current_mode": string
+}
+```
 
 ### ROS2 Topics
 
 | 토픽명          | 발행자 노드          | 구독자 노드         | 설명                        |
 | -------------- | ------------------ | ------------------ | --------------------------- |
-| `/eye_pose`    | eye_pos_node       | fusion_node        | Jetson에서 추적된 사용자 눈 위치 (x, y, z) |
-| `/lidar_dist`  | lidar_node         | fusion_node        | LiDAR 거리 센서 데이터 (y축 거리) |
+| `/eye_pose`    | eye_pose_node      | fusion_node        | Jetson에서 추적된 사용자 눈 위치 (x, y, z) |
 | `/mac_addr`    | pairing_bridge_node | manual_bt_node     | 페어링된 디바이스 MAC 주소        |
 | `/manual_pose` | manual_bt_node     | fusion_node        | 수동 블루투스 제어로 설정된 자세     |
 | `/preset_pose` | preset_bridge_node | fusion_node        | 프리셋으로 저장된 자세 데이터       |
 | `/control_mode`| control_bridge_node | fusion_node        | 제어 모드 전환 신호            |
 | `/cmd_pose`    | fusion_node        | arm_control_node   | 로봇팔 목표 위치 전달 (최종 제어 명령) |
 
-### 메시지 예시
+### /eye_pose
 
 ```json
 {
-  "profile_id": "user123",
-  "previous_mode": "auto",
-  "current_mode": "preset"
+  "lefteye_x": float,
+  "lefteye_y": float,
+  "lefteye_z": float,
+  "righteye_x": float,
+  "righteye_y": float,
+  "righteye_z": float,
 }
 ```
 
----
+### /manual_pose
 
-## 🧰 개발 및 테스트
-
-```bash
-# 특정 패키지만 빌드
-colcon build --packages-select control_bridge_node
-
-# 테스트 실행
-colcon test --packages-select control_bridge_node
-
-# ROS 로그 확인
-ros2 log info
+```json
+{
+  "lefteye_x": float,
+  "lefteye_y": float,
+  "lefteye_z": float,
+  "righteye_x": float,
+  "righteye_y": float,
+  "righteye_z": float,
+}
 ```
 
----
+### /preset_pose
 
-## 🔐 환경변수 (.env 예시)
-
-```env
-MQTT_HOST=your-broker.amazonaws.com
-MQTT_PORT=8883
-MQTT_PROTOCOL=mqtts
-MQTT_USER=username
-MQTT_PASSWD=password
-
-DEVICE_ID=pi5_device_001
-
-MQTT_CA_CERT=/path/to/ca.crt
-MQTT_CLIENT_CERT=/path/to/client.crt
-MQTT_CLIENT_KEY=/path/to/client.key
-
-MQTT_CONNECT_TIMEOUT=30
-MQTT_KEEP_ALIVE=60
+```json
+{
+  "lefteye_x": float,
+  "lefteye_y": float,
+  "lefteye_z": float,
+  "righteye_x": float,
+  "righteye_y": float,
+  "righteye_z": float,
+}
 ```
 
----
+### /cmd_pose
 
-## 🛠️ 모니터링 & 디버깅
-
-```bash
-# ROS 노드 및 통신 확인
-ros2 node list
-ros2 topic list
-ros2 topic echo /control_mode
-
-# 디버그 로그
-ros2 run control_bridge_node control_bridge_node --ros-args --log-level debug
-
-# MQTT 수동 테스트
-mosquitto_pub -h $MQTT_HOST -p $MQTT_PORT -t "/control_mode/test" -m '{"test": true}'
+```json
+{
+  "m11": float,
+  "m12": float,
+  "m13": float,
+  "m14": float
+}
 ```
 
----
+### /control_mode
 
-## 📚 참고 자료
-
-* [ROS2 Jazzy 공신 문서](https://docs.ros.org/en/jazzy/)
-* [Raspberry Pi 공신 문서](https://www.raspberrypi.com/documentation/)
-* [Adafruit PCA9685 Guide](https://learn.adafruit.com/16-channel-pwm-servo-driver)
-* [AWS IoT MQTT 가이드](https://docs.aws.amazon.com/iot/latest/developerguide/mqtt.html)
-* [Paho MQTT C++ 라이브러리](https://github.com/eclipse/paho.mqtt.cpp)
+```json
+{
+  "data": "auto" or "manual" or "preset" or "fix" or "off"
+}
+```
