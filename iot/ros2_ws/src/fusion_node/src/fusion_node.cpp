@@ -139,11 +139,11 @@
 // public:
 //   FusionNode() : Node("fusion_node") {
 //     // ---- Parameters ----
-//     declare_parameter<std::string>("anchor_dir",  "/home/b101/chj");
-//     declare_parameter<std::string>("left_json",   "left_move.json");
-//     declare_parameter<std::string>("right_json",  "right_move.json");
-//     declare_parameter<std::string>("up_json",     "up_move.json");
-//     declare_parameter<std::string>("down_json",   "down_move.json");
+//     declare_parameter<std::string>("anchor_dir",  "/home/b101/chj/v1");
+//     declare_parameter<std::string>("left_json",   "left_move.jsonl");
+//     declare_parameter<std::string>("right_json",  "right_move.jsonl");
+//     declare_parameter<std::string>("up_json",     "up_move.jsonl");
+//     declare_parameter<std::string>("down_json",   "down_move.jsonl");
 
 //     declare_parameter<double>("x0_mm",      140.0);
 //     declare_parameter<double>("z0_mm",      900.0);
@@ -315,13 +315,11 @@ static inline double wrap_to_pi(double a) {
   while (a < -M_PI) a += 2.0 * M_PI;
   return a;
 }
-
 static inline double slerp_angle(double a, double b, double t) {
   double da = wrap_to_pi(b - a);
   t = std::clamp(t, 0.0, 1.0);
   return wrap_to_pi(a + da * t);
 }
-
 static inline std::string join_paths(const std::string& a, const std::string& b) {
   if (a.empty()) return b;
   return (a.back() == '/') ? (a + b) : (a + "/" + b);
@@ -339,7 +337,6 @@ static std::optional<double> pick_double(const std::string& s, const std::string
   if (e == std::string::npos) return std::nullopt;
   return std::stod(s.substr(p, e - p));
 }
-
 static std::optional<uint64_t> pick_u64(const std::string& s, const std::string& key) {
   const std::string tag = "\"" + key + "\":";
   size_t p = s.find(tag);
@@ -348,6 +345,17 @@ static std::optional<uint64_t> pick_u64(const std::string& s, const std::string&
   size_t e = s.find_first_of(",}", p);
   if (e == std::string::npos) return std::nullopt;
   return static_cast<uint64_t>(std::stoull(s.substr(p, e - p)));
+}
+static std::optional<std::string> pick_string(const std::string& s, const std::string& key) {
+  const std::string tag = "\"" + key + "\":";
+  size_t p = s.find(tag);
+  if (p == std::string::npos) return std::nullopt;
+  p += tag.size();
+  while (p < s.size() && isspace(static_cast<unsigned char>(s[p]))) ++p;
+  if (p >= s.size() || s[p] != '"') return std::nullopt;
+  size_t q = s.find('"', p + 1);
+  if (q == std::string::npos) return std::nullopt;
+  return s.substr(p + 1, q - (p + 1));
 }
 
 static std::optional<std::string> pick_string(const std::string& s, const std::string& key) {
@@ -394,14 +402,55 @@ static bool load_rad4_from_json(const std::string& path, std::array<double,4>& o
 }
 
 // =========================
-// Anchors (calibration points)
+// One Euro & Kalman
+// =========================
+struct OneEuro {
+  double min_cutoff{1.2}; // Hz
+  double beta{0.4};
+  double d_cutoff{2.0};
+  bool init{false};
+  double x_prev{0.0};
+  double dx_prev{0.0};
+  static inline double alpha_from_cutoff(double cutoff, double dt){
+    double tau = 1.0 / (2.0 * M_PI * std::max(cutoff, 1e-6));
+    return 1.0 / (1.0 + tau / std::max(dt, 1e-6));
+  }
+  double filter(double x, double dt){
+    if(!init){ x_prev=x; dx_prev=0.0; init=true; return x; }
+    double dx = (x - x_prev) / std::max(dt, 1e-6);
+    double a_d = alpha_from_cutoff(d_cutoff, dt);
+    double dx_hat = a_d * dx + (1.0 - a_d) * dx_prev;
+    double cutoff = min_cutoff + beta * std::fabs(dx_hat);
+    double a = alpha_from_cutoff(cutoff, dt);
+    double y = a * x + (1.0 - a) * x_prev;
+    x_prev = y; dx_prev = dx_hat;
+    return y;
+  }
+};
+
+struct ScalarKalman {
+  double Q{2e-5};
+  double R{2e-3};
+  bool init{false};
+  double x{0.0};
+  double P{1.0};
+  double update(double z){
+    if(!init){ x=z; P=1.0; init=true; return x; }
+    P = P + Q;
+    double S = P + R;
+    double K = (S > 0.0) ? (P / S) : 0.0;
+    x = x + K * (z - x);
+    P = (1.0 - K) * P;
+    return x;
+  }
+};
+
+// =========================
+// Anchors
 // =========================
 struct Anchors {
-  // 좌/우는 q11만 사용
   double left_q11  = +2.8149 + M_PI;
   double right_q11 = -2.6569 + M_PI;
-
-  // 상/하는 q12~14 사용
   double up_q12  = +0.2255, up_q13  = -0.3206, up_q14  = +0.5123;
   double down_q12= +0.3375, down_q13= +0.7440, down_q14= -0.7624;
 
@@ -449,9 +498,28 @@ public:
 
     declare_parameter<double>("x0_mm",      140.0);
     declare_parameter<double>("z0_mm",      900.0);
-    declare_parameter<double>("x_span_mm",  180.0);
-    declare_parameter<double>("z_span_mm",  140.0);
+    declare_parameter<double>("x_span_mm",  240.0);
+    declare_parameter<double>("z_span_mm",  180.0);
     declare_parameter<double>("alpha",      1.00);
+
+    // Manual mode boundaries
+    declare_parameter<double>("manual_x_min_mm", -300.0);
+    declare_parameter<double>("manual_x_max_mm", 500.0);
+    declare_parameter<double>("manual_y_min_mm", -500.0);
+    declare_parameter<double>("manual_y_max_mm", 100.0);
+    declare_parameter<double>("manual_z_min_mm", 600.0);
+    declare_parameter<double>("manual_z_max_mm", 1070.0);
+
+    // Filters
+    declare_parameter<bool>("use_one_euro", true);
+    // 0.6, 0.20,1.8
+    declare_parameter<double>("one_euro_min_cutoff", 0.45);
+    declare_parameter<double>("one_euro_beta",       0.15);
+    declare_parameter<double>("one_euro_d_cutoff",   1.2);
+
+    declare_parameter<bool>("use_kalman", true);
+    declare_parameter<double>("kalman_Q", 2e-5);
+    declare_parameter<double>("kalman_R", 8e-3);
 
     // Manual mode boundaries
     declare_parameter<double>("manual_x_min_mm", -300.0);
@@ -484,7 +552,20 @@ public:
 
     timer_ = create_wall_timer(20ms, std::bind(&FusionNode::loop, this));
 
-    RCLCPP_INFO(get_logger(), "✅ fusion_node started (uses JSON anchors, prints sx/sy).");
+    // Filters init
+    one_x_.min_cutoff = get_parameter("one_euro_min_cutoff").as_double();
+    one_x_.beta       = get_parameter("one_euro_beta").as_double();
+    one_x_.d_cutoff   = get_parameter("one_euro_d_cutoff").as_double();
+    one_y_ = one_x_;
+    one_z_ = one_x_;
+    kf_q12_.Q = get_parameter("kalman_Q").as_double();
+    kf_q13_.Q = kf_q12_.Q; kf_q14_.Q = kf_q12_.Q; kf_c11_.Q = kf_q12_.Q; kf_s11_.Q = kf_q12_.Q;
+    kf_q12_.R = get_parameter("kalman_R").as_double();
+    kf_q13_.R = kf_q12_.R; kf_q14_.R = kf_q12_.R; kf_c11_.R = kf_q12_.R; kf_s11_.R = kf_q12_.R;
+
+    last_loop_time_ = now();
+
+    RCLCPP_INFO(get_logger(), "✅ fusion_node started (OneEuro + Kalman enabled).");
   }
 
 private:
@@ -511,17 +592,23 @@ private:
 
   // ---- Manual / Preset inputs ----
   std::optional<double> man_x_, man_y_, man_z_;
-    
+  std::optional<uint64_t> man_time;
   std::optional<double> pre_lx_, pre_ly_, pre_lz_, pre_rx_, pre_ry_, pre_rz_;
+  double prev_m14{0.0};
 
   // ---- Smoothing ----
   std::array<double,4> q_prev_{0,0,0,0};
   bool first_{true};
 
+  // One Euro for xyz
+  OneEuro one_x_, one_y_, one_z_;
+  // Kalman for q12,q13,q14 and cos/sin(q11)
+  ScalarKalman kf_q12_, kf_q13_, kf_q14_, kf_c11_, kf_s11_;
+  rclcpp::Time last_loop_time_;
+
   // -------------------------
   // Input handling
   // -------------------------
-  // /eye_pose: {lefteye_x, lefteye_y, lefteye_z, righteye_x, righteye_y, righteye_z, timestamp}
   void on_eye_pose(const std_msgs::msg::String::SharedPtr m) {
     auto _lx = pick_double(m->data, "lefteye_x");
     auto _ly = pick_double(m->data, "lefteye_y");
@@ -529,7 +616,7 @@ private:
     auto _rx = pick_double(m->data, "righteye_x");
     auto _ry = pick_double(m->data, "righteye_y");
     auto _rz = pick_double(m->data, "righteye_z");
-    auto _ts = pick_u64  (m->data, "timestamp");
+    auto _ts = pick_u64(m->data, "timestamp");
 
     if (_lx && _ly && _lz && _rx && _ry && _rz && _ts) {
       // 현재 갱신
@@ -540,23 +627,20 @@ private:
     }
   }
 
-  // /manual_pose: {"x":float,"y":float,"z":float}
   void on_manual_pose(const std_msgs::msg::String::SharedPtr m) {
     auto _x = pick_double(m->data, "x");
     auto _y = pick_double(m->data, "y");
     auto _z = pick_double(m->data, "z");
+    auto _time = pick_u64(m->data,"time");
     if (_x && _y && _z) {
-      // 0이면 움직이지 않고, 0이 아니면 -10 또는 +10으로 매핑
-      man_x_ = (*_x == 0.0) ? 0.0 : ((*_x > 0.0) ? -10.0 : 10.0);
-      man_y_ = (*_y == 0.0) ? 0.0 : ((*_y > 0.0) ? 10.0 : -10.0);
-      man_z_ = (*_z == 0.0) ? 0.0 : ((*_z > 0.0) ? -10.0 : 10.0);
-      // RCLCPP_INFO(get_logger(), "Manual pose received: x=%.1f y=%.1f z=%.1f", *man_x_, *man_y_, *man_z_);
+      man_x_ = (*_x == 0.0) ? 0.0 : ((*_x > 0.0) ? -3.0 : 3.0);
+      man_y_ = (*_y == 0.0) ? 0.0 : ((*_y > 0.0) ? -0.007 : 0.007);
+      man_z_ = (*_z == 0.0) ? 0.0 : ((*_z > 0.0) ? -3.0 : 3.0);
+      if(_time)man_time = *_time;
     } else {
       RCLCPP_WARN(get_logger(), "Manual pose parse failed (expect {\"x\",\"y\",\"z\"}). Raw: %s", m->data.c_str());
     }
   }
-  
-  // /preset_pose: {"lefteye_x":...,"lefteye_y":...,"lefteye_z":...,"righteye_x":...,"righteye_y":...,"righteye_z":...}
   void on_preset_pose(const std_msgs::msg::String::SharedPtr m) {
     auto _lx = pick_double(m->data, "lefteye_x");
     auto _ly = pick_double(m->data, "lefteye_y");
@@ -567,16 +651,13 @@ private:
     if (_lx && _ly && _lz && _rx && _ry && _rz) {
       pre_lx_ = *_lx; pre_ly_ = *_ly; pre_lz_ = *_lz; 
       pre_rx_ = *_rx; pre_ry_ = *_ry; pre_rz_ = *_rz;
-      // 현재 위치 저장
       RCLCPP_INFO(get_logger(), "Preset pose received (L:%.1f,%.1f,%.1f / R:%.1f,%.1f,%.1f)",
                   *pre_lx_, *pre_ly_, *pre_lz_, *pre_rx_, *pre_ry_, *pre_rz_);
     } else {
       RCLCPP_WARN(get_logger(), "Preset pose parse failed (expect 6 eye fields). Raw: %s", m->data.c_str());
     }
   }
-
   void on_control_mode(const std_msgs::msg::String::SharedPtr m) {
-    // /control_mode: {"data":"auto"|"manual"|"preset"|"fix"|"off"}
     Mode new_mode = mode_;
     if (auto s = pick_string(m->data, "data")) {
       if (*s == "auto")   new_mode = Mode::Auto;
@@ -585,7 +666,6 @@ private:
       else if (*s == "fix")    new_mode = Mode::Fix;
       else if (*s == "off")    new_mode = Mode::Off;
     } else {
-      // JSON이 아니라면 전체 문자열로도 허용
       const std::string &v = m->data;
       if (v == "auto")   new_mode = Mode::Auto;
       else if (v == "manual") new_mode = Mode::Manual;
@@ -613,9 +693,80 @@ private:
   // Main loop
   // -------------------------
   void loop() {
+    // dt (One Euro용)
+    rclcpp::Time now_t = now();
+    double dt = (now_t - last_loop_time_).seconds();
+    if (dt <= 0.0) dt = 0.02;
+    dt = std::clamp(dt, 0.001, 0.1);
+    last_loop_time_ = now_t;
+
     // 위치 소스 선택
     double x_mm=0.0, y_mm=0.0, z_mm=0.0;
     bool ok = false;
+
+    if (mode_ == Mode::Off) {
+      x_mm = 178.4; y_mm = -227.2; z_mm = 769.5;
+      ok = true;
+      prev_x_ = x_mm; prev_y_ = y_mm; prev_z_ = z_mm;
+    };
+
+    if (mode_ == Mode::Fix) {
+      if (!first_) {
+        arm_control_node::msg::CmdPose m;
+        m.header.stamp = this->now();
+        m.m11 = q_prev_[0]; m.m12 = q_prev_[1]; m.m13 = q_prev_[2]; m.m14 = q_prev_[3];
+        pub_->publish(m);
+      }
+      return;
+    }
+
+    rclcpp::Time stamp = this->now();
+
+    if (mode_ == Mode::Auto) {
+      ok = eye_avg(x_mm, y_mm, z_mm);
+      if (ok) stamp = rclcpp::Time(ts_);
+    } else if (mode_ == Mode::Manual) {
+      x_mm = (have_ ? prev_x_ : 0.0) + *man_x_;
+      y_mm = (have_ ? prev_y_ : 0.0);
+      z_mm = (have_ ? prev_z_ : 0.0) + *man_z_;
+      
+      x_mm = std::clamp(x_mm, get_parameter("manual_x_min_mm").as_double(), get_parameter("manual_x_max_mm").as_double());
+      y_mm = std::clamp(y_mm, get_parameter("manual_y_min_mm").as_double(), get_parameter("manual_y_max_mm").as_double());
+      z_mm = std::clamp(z_mm, get_parameter("manual_z_min_mm").as_double(), get_parameter("manual_z_max_mm").as_double());
+      if (*man_y_ != 0.0) {
+        prev_m14 += *man_y_;
+        prev_m14 = std::clamp(prev_m14,-1.50,+1.30);
+      }
+      ok = true;
+      prev_x_ = x_mm; prev_y_ = y_mm; prev_z_ = z_mm;
+
+      if (man_time) {
+        stamp = rclcpp::Time(static_cast<int64_t>(*man_time));
+      } else {
+        stamp = this->now();
+      }
+    } else if (mode_ == Mode::Preset) {
+      x_mm = 0.5 * (*pre_lx_) + 0.5 * (*pre_rx_);
+      y_mm = 0.5 * (*pre_ly_) + 0.5 * (*pre_ry_);
+      z_mm = 0.5 * (*pre_lz_) + 0.5 * (*pre_rz_);
+      stamp = this->now();
+      ok = true;
+      prev_x_ = x_mm; prev_y_ = y_mm; prev_z_ = z_mm;
+    }
+
+    if (!ok) return;
+
+    // One Euro: 입력 xyz 필터
+    if (get_parameter("use_one_euro").as_bool()) {
+      one_x_.min_cutoff = get_parameter("one_euro_min_cutoff").as_double();
+      one_x_.beta       = get_parameter("one_euro_beta").as_double();
+      one_x_.d_cutoff   = get_parameter("one_euro_d_cutoff").as_double();
+      one_y_.min_cutoff = one_x_.min_cutoff; one_y_.beta = one_x_.beta; one_y_.d_cutoff = one_x_.d_cutoff;
+      one_z_.min_cutoff = one_x_.min_cutoff; one_z_.beta = one_x_.beta; one_z_.d_cutoff = one_x_.d_cutoff;
+      x_mm = one_x_.filter(x_mm, dt);
+      y_mm = one_y_.filter(y_mm, dt);
+      z_mm = one_z_.filter(z_mm, dt);
+    }
 
     // OFF 모드: 아무 것도 발행하지 않음
     if (mode_ == Mode::Off) {
@@ -682,7 +833,7 @@ private:
 
     // Normalized gaze to [-1,1]
     double sx = std::clamp((x_mm - x0) / xs, -1.0, 1.0);
-    double sy = std::clamp((z0 - z_mm) / zs, -1.0, 1.0);  // ↑위로 갈수록 sy 증가(부호 보정)
+    double sy = std::clamp((z0 - z_mm) / zs, -1.0, 1.0);
 
     // L/R, U/D 보간 파라미터
     double t_lr = 0.5 * (sx + 1.0);
@@ -695,34 +846,57 @@ private:
     double q13 = lerp(anchors_.down_q13, anchors_.up_q13, t_ud);
     double q14 = lerp(anchors_.down_q14, anchors_.up_q14, t_ud);
 
-    // 스무딩 (joint11만 wrap 기반, 나머지는 선형)
     std::array<double,4> q{q11,q12,q13,q14};
-    if (first_) {
-      q_prev_ = q;
-      first_ = false;
-    } else {
-      for (int i = 0; i < 4; ++i) {
-        if (i == 0) {
-          double d = wrap_to_pi(q[i] - q_prev_[i]);
-          q[i] = wrap_to_pi(q_prev_[i] + alpha * d);
-        } else {
-          q[i] = q_prev_[i] * (1.0 - alpha) + q[i] * alpha;
-        }
-      }
-      q_prev_ = q;
-    }
 
+    // Kalman: 사용 시 칼만, 아니면 기존 alpha 스무딩
+    if (get_parameter("use_kalman").as_bool()) {
+      // q11 -> cos/sin 칼만
+      kf_c11_.Q = get_parameter("kalman_Q").as_double();
+      kf_s11_.Q = kf_c11_.Q;
+      kf_c11_.R = get_parameter("kalman_R").as_double();
+      kf_s11_.R = kf_c11_.R;
+      double c = std::cos(q[0]), s = std::sin(q[0]);
+      double cf = kf_c11_.update(c);
+      double sf = kf_s11_.update(s);
+      double n = std::hypot(cf, sf); if (n > 1e-6) { cf/=n; sf/=n; }
+      q[0] = std::atan2(sf, cf);
+
+      // q12~q14 스칼라 칼만
+      kf_q12_.Q = kf_c11_.Q; kf_q12_.R = kf_c11_.R;
+      kf_q13_.Q = kf_c11_.Q; kf_q13_.R = kf_c11_.R;
+      kf_q14_.Q = kf_c11_.Q; kf_q14_.R = kf_c11_.R;
+      q[1] = kf_q12_.update(q[1]);
+      q[2] = kf_q13_.update(q[2]);
+      q[3] = kf_q14_.update(q[3]);
+
+      q_prev_ = q; first_ = false;
+    } else {
+      // 기존 alpha 스무딩 로직 유지
+      if (first_) {
+        q_prev_ = q;
+        first_ = false;
+      } else {
+        for (int i = 0; i < 4; ++i) {
+          if (i == 0) {
+            double d = wrap_to_pi(q[i] - q_prev_[i]);
+            q[i] = wrap_to_pi(q_prev_[i] + alpha * d);
+          } else {
+            q[i] = q_prev_[i] * (1.0 - alpha) + q[i] * alpha;
+          }
+        }
+        q_prev_ = q;
+      }
+    }
+    if (mode_ == Mode::Manual) {
+      q[3] = std::clamp(q[3] + prev_m14, -1.20, +1.20);
+    }
     // Publish
     arm_control_node::msg::CmdPose m;
     m.header.stamp = stamp;
     m.m11 = q[0]; m.m12 = q[1]; m.m13 = q[2]; m.m14 = q[3];
+    q_prev_[3] = q[3];
     pub_->publish(m);
-
-    // Log
-    // RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 200,
-    //   "[%s] Eye(mm)=(%.1f,%.1f,%.1f) sx=%.2f sy=%.2f | q=[%.3f %.3f %.3f %.3f]",
-    //   mode_==Mode::Auto?"auto":mode_==Mode::Manual?"manual":mode_==Mode::Preset?"preset":mode_==Mode::Fix?"fix":"off",
-    //   x_mm, y_mm, z_mm, sx, sy, q[0], q[1], q[2], q[3]);
+    
   }
 };
 

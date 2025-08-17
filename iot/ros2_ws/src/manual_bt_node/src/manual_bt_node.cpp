@@ -24,6 +24,20 @@ using namespace std::chrono_literals;
 class ManualBTNode;
 class GattApplication;
 
+
+
+// ───────────────────────────────── 유틸 (LE 파서)
+static inline uint32_t read_le32(const std::vector<uint8_t>& d, size_t off) {
+    return static_cast<uint32_t>(d[off]) |
+           (static_cast<uint32_t>(d[off+1]) << 8) |
+           (static_cast<uint32_t>(d[off+2]) << 16) |
+           (static_cast<uint32_t>(d[off+3]) << 24);
+  }
+  static inline uint16_t read_le16(const std::vector<uint8_t>& d, size_t off) {
+    return static_cast<uint16_t>(d[off]) |
+           (static_cast<uint16_t>(d[off+1]) << 8);
+  }
+
 // ── GattService 어댑터 ────────────────────────────────────────────────
 class GattService : public sdbus::AdaptorInterfaces<org::bluez::GattService1_adaptor>
 {
@@ -64,7 +78,7 @@ public:
     sdbus::ObjectPath Service() override {
         return sdbus::ObjectPath("/org/example/application/service0");
     }
-    std::vector<std::string> Flags() override { return {"read", "write"}; }
+    std::vector<std::string> Flags() override { return {"read", "write","write-without-response"}; }
 
 private:
     ManualBTNode* node_; // ROS 2 노드에 접근하기 위한 포인터
@@ -189,17 +203,46 @@ public:
             RCLCPP_WARN(this->get_logger(), "수신 데이터가 너무 짧습니다 (3바이트 필요). Size: %zu", data.size());
             return;
         }
+        // 데이터를 받은 이후부터 찍을 timestamp
+        // const uint64_t time = static_cast<uint64_t>(this->now().nanoseconds());
 
         // 바이트 배열에서 값을 추출
-        float x = static_cast<float>(static_cast<int8_t>(data[0]));
-        float y = static_cast<float>(static_cast<int8_t>(data[1]));
-        float z = static_cast<float>(static_cast<int8_t>(data[2]));
+        // float x = static_cast<float>(static_cast<int8_t>(data[0]));
+        // float y = static_cast<float>(static_cast<int8_t>(data[1]));
+        // float z = static_cast<float>(static_cast<int8_t>(data[2]));
+        const uint8_t  ver   = data[0];
+        const uint32_t epoch = read_le32(data, 1);
+        const uint16_t msec  = read_le16(data, 5);
 
-        // JSON 문자열 생성
+        const uint64_t t0_ns =
+            (uint64_t)epoch * 1000000000ULL +
+            (uint64_t)msec  * 1000000ULL;
+
+        const uint64_t rx_ns = (uint64_t)this->now().nanoseconds();
+        const uint64_t latency_ns = (rx_ns > t0_ns) ? (rx_ns - t0_ns) : 0ULL;
+
+        // --- 오프셋 제거: 첫 패킷 기준 고정 ---
+        static bool     have_offset = false;
+        static int64_t  offset_ns   = 0;
+        if (!have_offset) {
+            offset_ns = (int64_t)latency_ns;
+            have_offset = true;
+        }
+        const int64_t net_ns = (int64_t)latency_ns - offset_ns;  // ≈ 실질 지터/지연
+
+        const float x = (float)(int8_t)data[7];
+        const float y = (float)(int8_t)data[8];
+        const float z = (float)(int8_t)data[9];
+
+        // 로그: ms (오프셋 제거한 값과 원래 측정치 둘 다)
+        RCLCPP_INFO(this->get_logger(),
+            "[BLE] Δabs=%.3f ms, Δnet=%.3f ms | xyz=(%.0f,%.0f,%.0f) v=0x%02X",
+            (double)latency_ns/1e6, (double)net_ns/1e6, x, y, z, ver);
         nlohmann::json json_data;
         json_data["x"] = x;
         json_data["y"] = y;
         json_data["z"] = z;
+        json_data["time"] = latency_ns;
 
         std_msgs::msg::String string_msg;
         string_msg.data = json_data.dump();
