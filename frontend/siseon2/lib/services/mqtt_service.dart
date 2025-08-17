@@ -89,7 +89,7 @@ class MqttService {
     if (client.connectionStatus?.state == MqttConnectionState.connected) {
       final builder = MqttClientPayloadBuilder();
       builder.addString(jsonEncode(payload));
-      client.publishMessage(topic, MqttQos.atMostOnce, builder.payload!);
+      client.publishMessage(topic, MqttQos.atLeastOnce, builder.payload!);
       print("📤 MQTT 발행: $topic → ${jsonEncode(payload)}");
     } else {
       print('❌ MQTT 발행 실패: 연결 불가');

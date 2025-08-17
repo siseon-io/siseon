@@ -10,7 +10,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  video_player: ^2.9.1
   google_sign_in: ^6.2.1
   http: ^0.13.0
   flutter_joystick: ^0.2.2
@@ -56,8 +55,6 @@ flutter:
     - assets/images/
     - assets/certs/cert.pem
     - .env
-    - assets/loading/loading.mp4
-
   fonts:
     - family: Pretendard
       fonts:

@@ -487,7 +487,7 @@ class _RootScreenState extends State<RootScreen> {
                       _buildTabItem(Icons.home, '홈', 0),
                       _buildManualTabItem(),
                       const SizedBox(width: 56),
-                      _buildTabItem(Icons.chat_bubble_rounded, '챗봇', 1),
+                      _buildTabItem(Icons.smart_toy_rounded, '챗봇', 1),
                       _buildTabItem(Icons.settings, '설정', 2),
                     ],
                   ),

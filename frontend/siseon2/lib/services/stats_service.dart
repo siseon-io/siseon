@@ -7,11 +7,11 @@ import 'package:siseon2/services/auth_service.dart';
 
 class StatsService {
   // ✅ 새 베이스 (HTTPS + /siseon 프리픽스)
-  static const String _base = 'https://i13b101.p.ssafy.io/siseon';
+  static const String _baseurl = 'https://i13b101.p.ssafy.io/siseon';
   static const String _path = '/api/posture-stats';
 
   static Uri _buildUri(Map<String, String> qp) =>
-      Uri.parse('$_base$_path').replace(queryParameters: qp);
+      Uri.parse('$_baseurl$_path').replace(queryParameters: qp);
 
   // ── 1) Day 집계 (period=day) ────────────────────────────────────────────────
   static Future<List<PostureStatsDay>> fetchDayStats({
