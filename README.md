@@ -1,6 +1,7 @@
 # SISEON: 인체공학 기반 디스플레이 제어 시스템
+<img src="./logo.png" alt="SISEON Project Image" width="200"/>
 
-## 💡 프로젝트 소개
+## 프로젝트 소개
 
 **SISEON**(Sight-based Intelligent System Elevation Optimization Normalizer)은 사용자의 눈 위치와 자세를 실시간으로 인식하여, 모니터 위치(X/Y/Z 축)를 자동으로 조정하는 **인체공학 기반 디스플레이 제어 시스템**입니다.
 
