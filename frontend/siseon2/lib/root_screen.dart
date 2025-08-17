@@ -196,39 +196,55 @@ class _RootScreenState extends State<RootScreen> {
 
   Future<void> _showLoadingOverlay(String message, Duration dur) async {
     if (!mounted) return;
-    showDialog(
+
+    // 다이얼로그를 전체 위에 띄우되 SafeArea로 하단 제스처바 침범 방지
+    showGeneralDialog(
       context: context,
+      barrierLabel: 'loading',
       barrierDismissible: false,
-      useRootNavigator: true,
-      builder: (_) =>
-          WillPopScope(
-            onWillPop: () async => false,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    vertical: 24, horizontal: 28),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF0D1117).withOpacity(0.9),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.white24),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const CircularProgressIndicator(),
-                    const SizedBox(height: 16),
-                    Text(message,
+      barrierColor: Colors.black54, // 살짝 어둡게
+      transitionDuration: const Duration(milliseconds: 120),
+      pageBuilder: (ctx, a1, a2) {
+        return SafeArea(
+          child: Center(
+            child: Material(
+              color: const Color(0xFF0D1117),
+              borderRadius: BorderRadius.circular(16),
+              clipBehavior: Clip.antiAlias, // 경계 깨끗하게
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 320),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 28),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: CircularProgressIndicator(strokeWidth: 3),
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        message,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 14)),
-                  ],
+                        softWrap: true, // 혹시 모를 줄바꿈 오버플로 방지
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
+        );
+      },
     );
+
+    // 지정 시간 뒤 수동으로 닫기 (닫힐 때 레이아웃 튐 방지)
     await Future.delayed(dur);
-    if (mounted) Navigator.of(context, rootNavigator: true).pop();
+    if (mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
   }
 
   Future<bool> _requireDeviceRegistered() async {
@@ -359,7 +375,7 @@ class _RootScreenState extends State<RootScreen> {
     }
 
     await _publishControlMode(ControlMode.manual, deviceSerial: serial);
-    await _showLoadingOverlay('잠깐만요, 자료 뒤적이는 중 📚', const Duration(seconds: 3));
+    await _showLoadingOverlay('3초 후 가로모드로 전환됩니다.', const Duration(seconds: 3));
 
     await SystemChrome.setPreferredOrientations(
       [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight],

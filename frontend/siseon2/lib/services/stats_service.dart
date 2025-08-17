@@ -30,15 +30,12 @@ class StatsService {
     };
 
     final uri = _buildUri(qp);
-    print('[StatsService][DAY] GET $uri');
 
     final res = await http.get(uri, headers: {
       'Authorization': 'Bearer $token',
       'Accept': 'application/json',
     });
 
-    print('[StatsService][DAY] status=${res.statusCode}');
-    print('[StatsService][DAY] body<= ${res.body.substring(0, res.body.length.clamp(0, 500))}');
 
     if (res.statusCode != 200) {
       throw Exception('Day 통계 불러오기 실패: ${res.statusCode}');
@@ -73,15 +70,12 @@ class StatsService {
     };
 
     final uri = _buildUri(qp);
-    print('[StatsService][MIN] GET $uri');
 
     final res = await http.get(uri, headers: {
       'Authorization': 'Bearer $token',
       'Accept': 'application/json',
     });
 
-    print('[StatsService][MIN] status=${res.statusCode}');
-    print('[StatsService][MIN] body<= ${res.body.substring(0, res.body.length.clamp(0, 500))}');
 
     if (res.statusCode != 200) {
       throw Exception('Minute 통계 불러오기 실패: ${res.statusCode}');
@@ -101,7 +95,6 @@ class StatsService {
           .toSet()
           .toList()
         ..sort();
-      print('[StatsService][MIN] 포함 월: $months');
     }
     return list;
   }
@@ -144,7 +137,6 @@ class StatsService {
     list.sort((a, b) => b.endAt.compareTo(a.endAt));
     final latest = list.first;
 
-    print('[StatsService] 최신 슬롯: slotIndex=${latest.slotIndex} @ ${latest.endAt.toIso8601String()}');
     return latest;
   }
 }

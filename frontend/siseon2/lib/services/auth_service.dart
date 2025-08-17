@@ -19,7 +19,6 @@ class AuthService {
     final exp = _safeExp(access);
     // 디버그: 새 토큰 만료시간
     // ignore: avoid_print
-    print('[AuthService] saved access exp=$exp');
   }
 
   static Future<String?> getAccessToken() async {
@@ -87,7 +86,6 @@ class AuthService {
     final rt = await getRefreshToken();
     if (rt == null) {
       // ignore: avoid_print
-      print('[AuthService] no refreshToken');
       return null;
     }
 
@@ -99,7 +97,6 @@ class AuthService {
 
     if (resp.statusCode != 200) {
       // ignore: avoid_print
-      print('[AuthService] refresh failed: ${resp.statusCode} ${resp.body}');
       return null;
     }
 
@@ -111,7 +108,6 @@ class AuthService {
 
     if (newAccess == null) {
       // ignore: avoid_print
-      print('[AuthService] refresh OK but access token missing. body=$data');
       return null;
     }
 
@@ -119,7 +115,6 @@ class AuthService {
     await _saveTokens(newAccess, newRefresh);
     final exp = _safeExp(newAccess);
     // ignore: avoid_print
-    print('[AuthService] got new access. exp=$exp');
 
     return newAccess;
   }
