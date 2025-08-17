@@ -190,6 +190,28 @@ def history(profileId: int = Query(..., gt=0),
     return messages
 
 # ──────────────────────
+# ChatLog Delete by profile_id
+# ──────────────────────
+@api_router.delete("/chat/logs/{profile_id}", status_code=204)
+def delete_chat_logs_by_profile(profile_id: int,
+                                user: TokenData = Depends(get_current_user),
+                                db: Session = Depends(get_db)):
+    """
+    지정한 profile_id의 모든 ChatLog 삭제
+    """
+    try:
+        deleted = db.query(ChatLog).filter(ChatLog.profile_id == profile_id).delete()
+        db.commit()
+        log.info("[chat_logs.delete] user=%s profile_id=%s deleted_count=%s",
+                 user.sub, profile_id, deleted)
+    except SQLAlchemyError as e:
+        db.rollback()
+        log.exception("[chat_logs.delete] DB error user=%s profile_id=%s", user.sub, profile_id)
+        raise HTTPException(status_code=500, detail=f"DB error: {type(e).__name__}: {e}")
+
+    return Response(status_code=204)
+
+# ──────────────────────
 # FAQ
 # ──────────────────────
 @api_router.get("/faq", response_model=List[FaqOut])

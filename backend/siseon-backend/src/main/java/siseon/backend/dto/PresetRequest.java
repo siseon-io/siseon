@@ -1,6 +1,5 @@
 package siseon.backend.dto;
 
-import jakarta.validation.constraints.NotNull;
 import lombok.*;
 
 @Getter
@@ -9,10 +8,12 @@ import lombok.*;
 @AllArgsConstructor
 @Builder
 public class PresetRequest {
-
-    @NotNull
     private Long profileId;
-
-    @NotNull
     private String name;
+    private double lefteyeX;
+    private double lefteyeY;
+    private double lefteyeZ;
+    private double righteyeX;
+    private double righteyeY;
+    private double righteyeZ;
 }

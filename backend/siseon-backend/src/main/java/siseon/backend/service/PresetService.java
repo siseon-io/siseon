@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import siseon.backend.domain.batch.PostureStats;
+import siseon.backend.domain.main.Device;
 import siseon.backend.domain.main.Preset;
 import siseon.backend.domain.main.Profile;
 import siseon.backend.domain.main.RawPosture;
@@ -14,6 +15,7 @@ import siseon.backend.repository.batch.PostureStatsRepository;
 import siseon.backend.repository.main.PresetRepository;
 import siseon.backend.repository.main.ProfileRepository;
 import siseon.backend.repository.main.RawPostureRepository;
+import siseon.backend.repository.main.DeviceRepository;
 
 import java.util.List;
 import java.util.Map;
@@ -24,61 +26,71 @@ import java.util.stream.Collectors;
 @Transactional
 public class PresetService {
 
-    private final ProfileRepository      profileRepo;
-    private final RawPostureRepository   rawRepo;
+    private final ProfileRepository profileRepo;
+    private final RawPostureRepository rawRepo;
     private final PostureStatsRepository statsRepo;
-    private final PresetRepository       presetRepo;
+    private final PresetRepository presetRepo;
+    private final DeviceRepository deviceRepo;
 
-    // manual preset
+    /**
+     * 수동 프리셋 저장
+     * - 최신 RawPosture의 pose_data에서 좌표 추출
+     */
     public PresetResponse createFromRaw(PresetRequest req) {
         Profile profile = profileRepo.findById(req.getProfileId())
                 .orElseThrow(() -> new IllegalArgumentException("프로필이 없습니다: " + req.getProfileId()));
 
-        RawPosture latestRaw = rawRepo
-                .findTopByProfileIdOrderByCollectedAtDesc(req.getProfileId())
+        RawPosture latestRaw = rawRepo.findTopByProfileIdOrderByCollectedAtDesc(req.getProfileId())
                 .orElseThrow(() -> new IllegalStateException("raw_posture 데이터가 없습니다: " + req.getProfileId()));
 
         @SuppressWarnings("unchecked")
-        Map<String,Number> rawMap = latestRaw.getMonitorCoord();
-        // Number → Object 매핑
-        Map<String,Object> coord = rawMap.entrySet().stream()
-                .collect(Collectors.toMap(
-                        Map.Entry::getKey,
-                        Map.Entry::getValue
-                ));
+        Map<String, Map<String, Number>> poseData =
+                (Map<String, Map<String, Number>>) latestRaw.getUserCoord().get("pose_data");
 
         Preset saved = presetRepo.save(
                 Preset.builder()
                         .profile(profile)
                         .name(req.getName())
-                        .monitorCoord(coord)
+                        .lefteyeX(poseData.get("le_eye").get("x").doubleValue())
+                        .lefteyeY(poseData.get("le_eye").get("y").doubleValue())
+                        .lefteyeZ(poseData.get("le_eye").get("z").doubleValue())
+                        .righteyeX(poseData.get("re_eye").get("x").doubleValue())
+                        .righteyeY(poseData.get("re_eye").get("y").doubleValue())
+                        .righteyeZ(poseData.get("re_eye").get("z").doubleValue())
                         .build()
         );
         return PresetResponse.from(saved);
     }
 
-    // push confirm preset
+    /**
+     * 자동 프리셋 저장
+     * - 최신 PostureStats의 좌표 컬럼 값 사용
+     */
     public PresetResponse createFromStats(PresetRequest req) {
         Profile profile = profileRepo.findById(req.getProfileId())
                 .orElseThrow(() -> new IllegalArgumentException("프로필이 없습니다: " + req.getProfileId()));
 
-        PostureStats stats = statsRepo
-                .findTopByProfileIdOrderByStartAtDesc(req.getProfileId())
+        PostureStats stats = statsRepo.findTopByProfileIdOrderByStartAtDesc(req.getProfileId())
                 .orElseThrow(() -> new IllegalStateException("통계 데이터가 없습니다: " + req.getProfileId()));
-
-        Map<String,Object> coord = stats.getMonitorCoord();
 
         Preset saved = presetRepo.save(
                 Preset.builder()
                         .profile(profile)
                         .name(req.getName())
-                        .monitorCoord(coord)
+                        .lefteyeX(stats.getLefteyeX())
+                        .lefteyeY(stats.getLefteyeY())
+                        .lefteyeZ(stats.getLefteyeZ())
+                        .righteyeX(stats.getRighteyeX())
+                        .righteyeY(stats.getRighteyeY())
+                        .righteyeZ(stats.getRighteyeZ())
                         .build()
         );
         return PresetResponse.from(saved);
     }
 
-    // profile <-> presets
+    /**
+     * 프로필별 프리셋 목록 조회
+     */
     @Transactional(readOnly = true)
     public List<PresetResponse> getPresetsByProfile(Long profileId) {
         return presetRepo.findByProfile_Id(profileId).stream()
@@ -86,7 +98,9 @@ public class PresetService {
                 .collect(Collectors.toList());
     }
 
-    // update
+    /**
+     * 프리셋 수정
+     */
     public PresetResponse updatePreset(Long presetId, PresetRequest req) {
         Preset preset = presetRepo.findById(presetId)
                 .orElseThrow(() -> new IllegalArgumentException("프리셋이 없습니다: " + presetId));
@@ -98,12 +112,16 @@ public class PresetService {
         return PresetResponse.from(presetRepo.save(preset));
     }
 
-    // delete
+    /**
+     * 프리셋 삭제
+     */
     public void deletePreset(Long presetId) {
         presetRepo.deleteById(presetId);
     }
 
-    // get
+    /**
+     * 프리셋 단건 조회
+     */
     @Transactional(readOnly = true)
     public PresetResponse getPresetResponse(Long presetId) {
         return presetRepo.findById(presetId)
@@ -111,7 +129,22 @@ public class PresetService {
                 .orElseThrow(() -> new IllegalArgumentException("프리셋이 없습니다: " + presetId));
     }
 
-    // get coordinate
+    /**
+     * profileId에 매칭된 device의 serialNumber 조회
+     */
+    @Transactional(readOnly = true)
+    public String getSerialNumberByProfileId(Long profileId) {
+        return deviceRepo.findByProfileId_Id(profileId).stream()
+                .findFirst()
+                .map(Device::getSerialNumber)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "해당 프로필에 연결된 디바이스가 없습니다. profileId=" + profileId
+                ));
+    }
+
+    /**
+     * 프리셋 좌표 조회
+     */
     @Transactional(readOnly = true)
     public PresetCoordinate getPresetCoordinate(Long profileId, Long presetId) {
         Preset preset = presetRepo.findById(presetId)
@@ -121,11 +154,14 @@ public class PresetService {
             throw new IllegalArgumentException("프리셋이 해당 프로필에 속하지 않습니다");
         }
 
-        Map<String,Object> coord = preset.getMonitorCoord();
-        double x = ((Number)coord.get("x")).doubleValue();
-        double y = ((Number)coord.get("y")).doubleValue();
-        double z = ((Number)coord.get("z")).doubleValue();
-
-        return new PresetCoordinate(x, y, z);
+        return new PresetCoordinate(
+                profileId,
+                preset.getLefteyeX(),
+                preset.getLefteyeY(),
+                preset.getLefteyeZ(),
+                preset.getRighteyeX(),
+                preset.getRighteyeY(),
+                preset.getRighteyeZ()
+        );
     }
 }

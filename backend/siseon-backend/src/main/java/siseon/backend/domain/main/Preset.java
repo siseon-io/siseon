@@ -5,10 +5,8 @@ import jakarta.validation.constraints.NotNull;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
-import siseon.backend.config.JsonConverter;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 
 @Entity
 @Table(name = "preset")
@@ -30,10 +28,19 @@ public class Preset {
     @Column(nullable = false, length = 100)
     private String name;
 
-    @NotNull
-    @Convert(converter = JsonConverter.class)
-    @Column(name = "monitor_coord", columnDefinition = "JSON", nullable = false)
-    private Map<String, Object> monitorCoord;
+    @NotNull @Column(name = "lefteye_x", nullable = false)
+    private double lefteyeX;
+    @NotNull @Column(name = "lefteye_y", nullable = false)
+    private double lefteyeY;
+    @NotNull @Column(name = "lefteye_z", nullable = false)
+    private double lefteyeZ;
+
+    @NotNull @Column(name = "righteye_x", nullable = false)
+    private double righteyeX;
+    @NotNull @Column(name = "righteye_y", nullable = false)
+    private double righteyeY;
+    @NotNull @Column(name = "righteye_z", nullable = false)
+    private double righteyeZ;
 
     @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)

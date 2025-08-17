@@ -4,16 +4,25 @@ import lombok.*;
 import siseon.backend.domain.main.Preset;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 
-@Getter @Setter
-@NoArgsConstructor @AllArgsConstructor @Builder
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class PresetResponse {
 
-    private Long    presetId;
-    private Long    profileId;
-    private String  name;
-    private Map<String,Object> monitorCoord;
+    private Long presetId;
+    private Long profileId;
+    private String name;
+
+    private double lefteyeX;
+    private double lefteyeY;
+    private double lefteyeZ;
+    private double righteyeX;
+    private double righteyeY;
+    private double righteyeZ;
+
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 
@@ -22,7 +31,12 @@ public class PresetResponse {
                 .presetId(e.getPresetId())
                 .profileId(e.getProfile().getId())
                 .name(e.getName())
-                .monitorCoord(e.getMonitorCoord())
+                .lefteyeX(e.getLefteyeX())
+                .lefteyeY(e.getLefteyeY())
+                .lefteyeZ(e.getLefteyeZ())
+                .righteyeX(e.getRighteyeX())
+                .righteyeY(e.getRighteyeY())
+                .righteyeZ(e.getRighteyeZ())
                 .createdAt(e.getCreatedAt())
                 .updatedAt(e.getUpdatedAt())
                 .build();

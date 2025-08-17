@@ -27,17 +27,22 @@ public class MqttConfig {
     @Value("${spring.mqtt.password}")
     private String password;
 
-    private static final String TOPIC_PRESET_COORDINATE = "preset_coordinate";
+    // 기본 토픽 prefix (serialNumber는 발행 시점에 붙임)
+    public static final String TOPIC_PRESET_COORDINATE_PREFIX = "/preset_coordinate";
 
     @Bean
     public MqttPahoClientFactory mqttClientFactory() {
         DefaultMqttPahoClientFactory factory = new DefaultMqttPahoClientFactory();
+        factory.setConnectionOptions(mqttConnectOptions());
+        return factory;
+    }
+
+    private MqttConnectOptions mqttConnectOptions() {
         MqttConnectOptions opts = new MqttConnectOptions();
         opts.setServerURIs(new String[]{brokerUrl});
         opts.setUserName(username);
         opts.setPassword(password.toCharArray());
-        factory.setConnectionOptions(opts);
-        return factory;
+        return opts;
     }
 
     @Bean
@@ -51,7 +56,7 @@ public class MqttConfig {
         MqttPahoMessageHandler handler =
                 new MqttPahoMessageHandler(clientId + "_pub_preset", factory);
         handler.setAsync(true);
-        handler.setDefaultTopic(TOPIC_PRESET_COORDINATE);
+        // setDefaultTopic 제거 → 발행 시점에 MqttHeaders.TOPIC 설정
         return handler;
     }
 }

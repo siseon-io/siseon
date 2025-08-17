@@ -19,7 +19,7 @@ public class ProfileCreateRequest {
     private LocalDate birthDate;
 
     @NotNull
-    private Float height;
+    private Integer height;
 
     @NotNull
     private Float leftVision;

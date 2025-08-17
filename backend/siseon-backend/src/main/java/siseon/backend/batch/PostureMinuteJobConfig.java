@@ -57,12 +57,10 @@ public class PostureMinuteJobConfig {
     @Bean
     public Tasklet minuteTasklet() {
         return (contrib, ctx) -> {
-            // [start, endExclusive] = 직전 1분 창(상한 배제)
             LocalDateTime end = LocalDateTime.now(KST).truncatedTo(ChronoUnit.MINUTES);
             LocalDateTime start = end.minusMinutes(1);
             LocalDateTime endExclusive = end.minusNanos(1);
 
-            // 'Between'은 양끝 포함이므로 상한을 end-1ns로 전달해 중복 방지
             List<RawPosture> raws = rawRepo.findByCollectedAtBetween(start, endExclusive);
             if (raws.isEmpty()) return RepeatStatus.FINISHED;
 
@@ -72,7 +70,6 @@ public class PostureMinuteJobConfig {
                 Long pid = entry.getKey();
                 List<RawPosture> list = entry.getValue();
 
-                // 1) 분 구간의 모든 posture를 분석해 결과 수집(각도/사유 포함)
                 var results = list.stream()
                         .map(r -> {
                             @SuppressWarnings("unchecked")
@@ -93,13 +90,11 @@ public class PostureMinuteJobConfig {
                         })
                         .toList();
 
-                // 2) valid 계산
                 long validCount = results.stream()
                         .filter(PostureAnalysisUtil.PostureResult::isValidPosture)
                         .count();
                 boolean valid = validCount >= Math.ceil(VALID_RATIO * results.size());
 
-                // 3) badReasons 생성 (양호면 템플릿, 아니면 대표 bad 결과 사용)
                 Map<String, Object> badReasons = valid
                         ? Map.of("valid", true, "reasons", List.of(), "summary", "양호")
                         : results.stream()
@@ -108,28 +103,33 @@ public class PostureMinuteJobConfig {
                         .map(PostureAnalysisUtil::buildBadReasonsMap)
                         .orElse(Map.of("valid", true, "reasons", List.of(), "summary", "양호"));
 
-                // 4) 모니터 평균 좌표 및 슬롯 인덱스 산출
-                double avgX = list.stream().mapToDouble(r -> num(r.getMonitorCoord(), "x")).average().orElse(0.0);
-                double avgY = list.stream().mapToDouble(r -> num(r.getMonitorCoord(), "y")).average().orElse(0.0);
-                double avgZ = list.stream().mapToDouble(r -> num(r.getMonitorCoord(), "z")).average().orElse(0.0);
+                // le_eye / re_eye 평균 계산
+                double avgLeX = list.stream().mapToDouble(r -> numPose(r.getUserCoord(), "le_eye", "x")).average().orElse(0.0);
+                double avgLeY = list.stream().mapToDouble(r -> numPose(r.getUserCoord(), "le_eye", "y")).average().orElse(0.0);
+                double avgLeZ = list.stream().mapToDouble(r -> numPose(r.getUserCoord(), "le_eye", "z")).average().orElse(0.0);
 
-                // 하루 기준 분 인덱스(0..1439): 창의 시작 분을 슬롯으로 사용
+                double avgReX = list.stream().mapToDouble(r -> numPose(r.getUserCoord(), "re_eye", "x")).average().orElse(0.0);
+                double avgReY = list.stream().mapToDouble(r -> numPose(r.getUserCoord(), "re_eye", "y")).average().orElse(0.0);
+                double avgReZ = list.stream().mapToDouble(r -> numPose(r.getUserCoord(), "re_eye", "z")).average().orElse(0.0);
+
                 int slotIndex = start.getHour() * 60 + start.getMinute();
 
-                // 5) 저장
                 PostureStats stats = PostureStats.builder()
                         .profileId(pid)
-                        .monitorCoord(Map.of("avgx", avgX, "avgy", avgY, "avgz", avgZ))
-                        .userCoord(Map.of("pose_data", Map.of())) // 집계물이므로 비워둠
+                        .lefteyeX(avgLeX)
+                        .lefteyeY(avgLeY)
+                        .lefteyeZ(avgLeZ)
+                        .righteyeX(avgReX)
+                        .righteyeY(avgReY)
+                        .righteyeZ(avgReZ)
+                        .userCoord(Map.of()) // 집계물이므로 비워둠
                         .startAt(start)
                         .endAt(end)
                         .durationSeconds(60)
                         .slotIndex(slotIndex)
                         .validPosture(valid)
+                        .badReasons(badReasons)
                         .build();
-
-                // ✅ badReasons 세팅
-                stats.setBadReasons(badReasons);
 
                 statsRepo.save(stats);
             }
@@ -148,18 +148,20 @@ public class PostureMinuteJobConfig {
         };
     }
 
-    // Map<String, ?> 로 받아 호출부(Map<String, Number> 또는 Map<String, Object>) 모두 허용
-    private static double num(Map<String, ?> m, String key) {
-        if (m == null) return 0.0;
-        Object v = m.get(key);
-        return (v instanceof Number) ? ((Number) v).doubleValue() : 0.0;
+    private static double numPose(Map<String, Object> userCoord, String joint, String axis) {
+        if (userCoord == null) return 0.0;
+        Object poseDataObj = userCoord.get("pose_data");
+        if (!(poseDataObj instanceof Map)) return 0.0;
+        Map<String, Map<String, Number>> poseData = (Map<String, Map<String, Number>>) poseDataObj;
+        Map<String, Number> jointMap = poseData.get(joint);
+        if (jointMap == null) return 0.0;
+        return jointMap.getOrDefault(axis, 0).doubleValue();
     }
 
     @Bean
     public Step rawCleanupStep() {
         return new StepBuilder("rawCleanupStep", jobRepository)
                 .tasklet((contrib, ctx) -> {
-                    // 처리 완료된 구간: [*, endExclusive] 까지 정리
                     LocalDateTime end = LocalDateTime.now(KST).truncatedTo(ChronoUnit.MINUTES);
                     LocalDateTime endExclusive = end.minusNanos(1);
                     rawRepo.deleteAll(rawRepo.findByCollectedAtLessThanEqual(endExclusive));
