@@ -1,8 +1,11 @@
-# SISEON 모니터암 제어 백엔드 (Updated)
+# SISEON 모니터암 제어 백엔드
 
-**시선(Siseon)**은 사용자의 자세 데이터를 주기적으로 수집·분석하고, 저장된 **프리셋**을 모니터암에 적용하여 자동으로 제어하는 IoT 백엔드 시스템
+사용자의 자세 데이터를 주기적으로 수집·분석하고, 저장된 **프리셋**을 모니터암에 적용하여 자동으로 제어하는 IoT 백엔드 시스템
 
 > 수집(HTTP API, 10초) → 원본 저장(`raw_postures`) → **분(minute) 배치** 집계(`posture_stats`) → **일(day) 배치** 집계(`posture_stats_day`) → 프리셋 MQTT 발행(`/preset_coordinate`) → FCM 푸시 알림
+
+<img width="657" height="457" alt="image" src="https://github.com/user-attachments/assets/e770b88b-aa6d-405e-9391-b44f2551f998" />
+
 
 ---
 
@@ -57,7 +60,7 @@
 
 ---
 
-## 배치 통계 처리 (2단계)
+## 배치 통계 처리
 
 ### 1) **분(minute) 배치** → `posture_stats`
 - **주기/트리거**: 스케줄러 또는 배치 잡(분 단위)
