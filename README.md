@@ -201,6 +201,20 @@ S13P11B101/
 
 ---
 
+## 시연 영상
+
+<div align="center">
+  <a href="https://youtu.be/rLJcAMue72o">
+    <img src="https://img.youtube.com/vi/rLJcAMue72o/hqdefault.jpg" alt="SISEON 시연 영상" width="720">
+  </a>
+  <br/><br/>
+  <a href="https://youtu.be/rLJcAMue72o">
+    <img src="https://img.shields.io/badge/Watch%20on%20YouTube-1E3A8A?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch on YouTube">
+  </a>
+</div>
+
+
+
 ## 참고 자료
 
 - [NVIDIA Jetson Developer Guide](https://developer.nvidia.com/embedded/jetson-orin-nano-developer-kit)
